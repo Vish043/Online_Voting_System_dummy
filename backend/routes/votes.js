@@ -1,0 +1,167 @@
+const express = require('express');
+const router = express.Router();
+const { admin, db, collections } = require('../config/firebase');
+const { verifyToken, verifyVoterEligibility } = require('../middleware/auth');
+const crypto = require('crypto');
+
+// Submit Vote
+router.post('/', verifyToken, verifyVoterEligibility, async (req, res) => {
+  try {
+    const { uid, email } = req.user;
+    const { electionId, candidateId } = req.body;
+
+    if (!electionId || !candidateId) {
+      return res.status(400).json({ error: 'Missing electionId or candidateId' });
+    }
+
+    // Verify election exists and is active
+    const electionDoc = await db.collection(collections.ELECTIONS).doc(electionId).get();
+    
+    if (!electionDoc.exists) {
+      return res.status(404).json({ error: 'Election not found' });
+    }
+
+    const electionData = electionDoc.data();
+    const now = admin.firestore.Timestamp.now();
+
+    if (electionData.status !== 'active') {
+      return res.status(400).json({ error: 'Election is not active' });
+    }
+
+    if (electionData.startDate > now) {
+      return res.status(400).json({ error: 'Election has not started yet' });
+    }
+
+    if (electionData.endDate < now) {
+      return res.status(400).json({ error: 'Election has ended' });
+    }
+
+    // Verify candidate exists and belongs to this election
+    const candidateDoc = await db.collection(collections.CANDIDATES).doc(candidateId).get();
+    
+    if (!candidateDoc.exists) {
+      return res.status(404).json({ error: 'Candidate not found' });
+    }
+
+    const candidateData = candidateDoc.data();
+    
+    if (candidateData.electionId !== electionId) {
+      return res.status(400).json({ error: 'Candidate does not belong to this election' });
+    }
+
+    // Check if user has already voted (using hash for privacy)
+    const voteHash = crypto.createHash('sha256').update(`${uid}-${electionId}`).digest('hex');
+    const existingVote = await db.collection(collections.VOTES).doc(voteHash).get();
+
+    if (existingVote.exists) {
+      return res.status(400).json({ error: 'You have already voted in this election' });
+    }
+
+    // Use Firestore transaction to ensure atomicity
+    await db.runTransaction(async (transaction) => {
+      // Create vote record (anonymized)
+      const voteData = {
+        voteHash, // User-election hash (not the actual vote)
+        electionId,
+        votedAt: admin.firestore.FieldValue.serverTimestamp(),
+        verified: true
+      };
+
+      transaction.set(db.collection(collections.VOTES).doc(voteHash), voteData);
+
+      // Increment candidate vote count
+      const candidateRef = db.collection(collections.CANDIDATES).doc(candidateId);
+      transaction.update(candidateRef, {
+        voteCount: admin.firestore.FieldValue.increment(1)
+      });
+
+      // Update voter's voting history
+      const voterRef = db.collection(collections.VOTER_REGISTRY).doc(uid);
+      transaction.update(voterRef, {
+        votingHistory: admin.firestore.FieldValue.arrayUnion({
+          electionId,
+          votedAt: admin.firestore.Timestamp.now(),
+          electionTitle: electionData.title
+        })
+      });
+
+      // Create audit log (without revealing the vote)
+      const auditLogRef = db.collection(collections.AUDIT_LOGS).doc();
+      transaction.set(auditLogRef, {
+        action: 'VOTE_CAST',
+        userId: uid,
+        email,
+        electionId,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      });
+    });
+
+    res.status(201).json({ 
+      message: 'Vote cast successfully',
+      electionId,
+      votedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Vote submission error:', error);
+    res.status(500).json({ error: 'Failed to submit vote' });
+  }
+});
+
+// Get User's Voting History
+router.get('/history', verifyToken, verifyVoterEligibility, async (req, res) => {
+  try {
+    const { uid } = req.user;
+
+    const voterDoc = await db.collection(collections.VOTER_REGISTRY).doc(uid).get();
+    
+    if (!voterDoc.exists) {
+      return res.status(404).json({ error: 'Voter record not found' });
+    }
+
+    const { votingHistory } = voterDoc.data();
+
+    res.json({ votingHistory: votingHistory || [] });
+  } catch (error) {
+    console.error('Voting history error:', error);
+    res.status(500).json({ error: 'Failed to fetch voting history' });
+  }
+});
+
+// Verify Vote Receipt (proves vote was counted without revealing choice)
+router.post('/verify', verifyToken, async (req, res) => {
+  try {
+    const { uid } = req.user;
+    const { electionId } = req.body;
+
+    if (!electionId) {
+      return res.status(400).json({ error: 'Missing electionId' });
+    }
+
+    const voteHash = crypto.createHash('sha256').update(`${uid}-${electionId}`).digest('hex');
+    const voteDoc = await db.collection(collections.VOTES).doc(voteHash).get();
+
+    if (!voteDoc.exists) {
+      return res.json({ 
+        verified: false,
+        message: 'No vote record found for this election'
+      });
+    }
+
+    const voteData = voteDoc.data();
+
+    res.json({ 
+      verified: true,
+      votedAt: voteData.votedAt,
+      electionId: voteData.electionId,
+      message: 'Your vote has been recorded and verified'
+    });
+  } catch (error) {
+    console.error('Vote verification error:', error);
+    res.status(500).json({ error: 'Failed to verify vote' });
+  }
+});
+
+module.exports = router;
+
