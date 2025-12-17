@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    function isVoterVerified() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/voterRegistry/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/voterRegistry/$(request.auth.uid)).data.isVerified == true;
+    }
+    
+    function isVoterEligible() {
+      return isVoterVerified() &&
+             get(/databases/$(database)/documents/voterRegistry/$(request.auth.uid)).data.isEligible == true;
+    }
+    
+    // Voter Registry Collection
+    match /voterRegistry/{voterId} {
+      // Allow users to create their own voter registration
+      allow create: if isSignedIn() && request.auth.uid == voterId;
+      
+      // Allow users to read their own data
+      allow read: if isSignedIn() && (request.auth.uid == voterId || isAdmin());
+      
+      // Allow users to update their own limited fields
+      allow update: if isSignedIn() && request.auth.uid == voterId &&
+                    !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isVerified', 'isEligible', 'nationalId', 'votingHistory']);
+      
+      // Only admins can verify voters
+      allow update: if isAdmin();
+      
+      // Only admins can delete
+      allow delete: if isAdmin();
+    }
+    
+    // Elections Collection
+    match /elections/{electionId} {
+      // Anyone can read active elections
+      allow read: if isSignedIn();
+      
+      // Only admins can create, update, or delete elections
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // Candidates Collection
+    match /candidates/{candidateId} {
+      // Anyone can read candidates
+      allow read: if isSignedIn();
+      
+      // Only admins can create, update, or delete candidates
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // Votes Collection - Highly Restricted
+    match /votes/{voteHash} {
+      // No one can read votes directly (anonymity)
+      allow read: if false;
+      
+      // Only eligible voters can create votes
+      // Vote hash must match the user-election combination
+      allow create: if isVoterEligible() && 
+                    !exists(/databases/$(database)/documents/votes/$(voteHash));
+      
+      // No updates or deletes allowed (immutability)
+      allow update, delete: if false;
+    }
+    
+    // Audit Logs Collection
+    match /auditLogs/{logId} {
+      // Only admins can read audit logs
+      allow read: if isAdmin();
+      
+      // System can create audit logs
+      allow create: if true;
+      
+      // No updates or deletes (immutability)
+      allow update, delete: if false;
+    }
+    
+    // Default deny all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
