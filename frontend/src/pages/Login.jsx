@@ -86,6 +86,12 @@ export default function Login() {
               Register here
             </Link>
           </p>
+          <p style={{ marginTop: '0.5rem' }}>
+            Admin?{' '}
+            <Link to="/admin/login" style={styles.link}>
+              Admin Login
+            </Link>
+          </p>
         </div>
       </div>
     </div>

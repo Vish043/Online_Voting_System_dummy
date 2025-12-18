@@ -240,7 +240,7 @@ const styles = {
     border: '2px solid transparent'
   },
   selectedCard: {
-    borderColor: 'var(--primary-color)',
+    border: '2px solid var(--primary-color)',
     backgroundColor: 'rgba(37, 99, 235, 0.05)',
     transform: 'scale(1.02)'
   },

@@ -129,7 +129,14 @@ export default function Dashboard() {
                     <div>
                       <strong>{vote.electionTitle}</strong>
                       <p style={styles.historyDate}>
-                        {new Date(vote.votedAt?.toDate()).toLocaleDateString()}
+                        {(() => {
+                          const date = vote.votedAt?.toDate ? 
+                            vote.votedAt.toDate() : 
+                            (vote.votedAt?.seconds ? 
+                              new Date(vote.votedAt.seconds * 1000) : 
+                              new Date(vote.votedAt));
+                          return date.toLocaleDateString();
+                        })()}
                       </p>
                     </div>
                     <span className="badge badge-success">Voted</span>
@@ -162,7 +169,28 @@ function StatusCard({ icon, title, status, color }) {
   )
 }
 
+// Helper function to convert Firestore Timestamp to Date
+function convertTimestampToDate(timestamp) {
+  if (!timestamp) return null;
+  
+  if (timestamp instanceof Date) {
+    return timestamp;
+  }
+  
+  if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+    return timestamp.toDate();
+  }
+  
+  if (timestamp.seconds) {
+    return new Date(timestamp.seconds * 1000);
+  }
+  
+  return new Date(timestamp);
+}
+
 function ElectionCard({ election, eligible }) {
+  const endDate = convertTimestampToDate(election.endDate);
+  
   return (
     <div className="card" style={styles.electionCard}>
       <div style={styles.electionHeader}>
@@ -173,7 +201,7 @@ function ElectionCard({ election, eligible }) {
       <div style={styles.electionFooter}>
         <div style={styles.electionDate}>
           <Calendar size={16} />
-          <span>Ends: {new Date(election.endDate?.toDate()).toLocaleDateString()}</span>
+          <span>Ends: {endDate ? endDate.toLocaleDateString() : 'N/A'}</span>
         </div>
         <Link 
           to={`/elections/${election.id}`} 

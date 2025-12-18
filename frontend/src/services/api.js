@@ -29,10 +29,23 @@ api.interceptors.request.use(
 // Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response) {
       // Server responded with error status
-      const message = error.response.data?.error || 'An error occurred'
+      const status = error.response.status
+      let message = error.response.data?.error || 'An error occurred'
+      
+      // Handle rate limiting (429)
+      if (status === 429) {
+        const retryAfter = error.response.headers['retry-after'] || 60
+        message = `Too many requests. Please wait ${retryAfter} seconds before trying again.`
+        console.warn('Rate limit exceeded. Waiting before retry...')
+        
+        // Wait and retry once for 429 errors
+        await new Promise(resolve => setTimeout(resolve, parseInt(retryAfter) * 1000))
+        return api.request(error.config)
+      }
+      
       console.error('API Error:', message)
       throw new Error(message)
     } else if (error.request) {

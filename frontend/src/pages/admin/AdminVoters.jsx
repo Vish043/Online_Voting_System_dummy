@@ -2,6 +2,29 @@ import { useState, useEffect } from 'react'
 import { adminAPI } from '../../services/api'
 import { Search, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react'
 
+// Helper function to convert Firestore Timestamp to Date
+function convertTimestampToDate(timestamp) {
+  if (!timestamp) return null;
+  
+  // If it's already a Date object
+  if (timestamp instanceof Date) {
+    return timestamp;
+  }
+  
+  // If it has toDate method (Firestore Timestamp object)
+  if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+    return timestamp.toDate();
+  }
+  
+  // If it's a serialized Firestore Timestamp (from JSON)
+  if (timestamp.seconds) {
+    return new Date(timestamp.seconds * 1000);
+  }
+  
+  // Try to parse as Date string
+  return new Date(timestamp);
+}
+
 export default function AdminVoters() {
   const [voters, setVoters] = useState([])
   const [filter, setFilter] = useState('pending')
@@ -133,7 +156,7 @@ export default function AdminVoters() {
                     <td>{voter.dateOfBirth}</td>
                     <td>
                       {voter.registeredAt ? 
-                        new Date(voter.registeredAt.toDate()).toLocaleDateString() : 
+                        convertTimestampToDate(voter.registeredAt)?.toLocaleDateString() || 'N/A' : 
                         'N/A'}
                     </td>
                     <td>

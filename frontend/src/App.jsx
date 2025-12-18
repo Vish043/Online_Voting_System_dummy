@@ -11,6 +11,7 @@ import ElectionDetail from './pages/ElectionDetail'
 import Vote from './pages/Vote'
 import Results from './pages/Results'
 import Profile from './pages/Profile'
+import AdminLogin from './pages/admin/AdminLogin'
 import AdminDashboard from './pages/admin/AdminDashboard'
 import AdminVoters from './pages/admin/AdminVoters'
 import AdminElections from './pages/admin/AdminElections'
@@ -46,7 +47,7 @@ function AdminRoute({ children }) {
   }
 
   if (!currentUser) {
-    return <Navigate to="/login" />
+    return <Navigate to="/admin/login" />
   }
 
   if (!isAdmin) {
@@ -67,6 +68,7 @@ function App() {
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/admin/login" element={<AdminLogin />} />
 
             {/* Protected Routes */}
             <Route

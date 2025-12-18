@@ -158,7 +158,7 @@ const styles = {
   },
   activeTab: {
     color: 'var(--primary-color)',
-    borderBottomColor: 'var(--primary-color)'
+    borderBottom: '3px solid var(--primary-color)'
   },
   emptyState: {
     textAlign: 'center',

@@ -3,6 +3,29 @@ import { useAuth } from '../contexts/AuthContext'
 import { authAPI } from '../services/api'
 import { User, Mail, Phone, MapPin, Calendar, CheckCircle, AlertCircle } from 'lucide-react'
 
+// Helper function to convert Firestore Timestamp to Date
+function convertTimestampToDate(timestamp) {
+  if (!timestamp) return null;
+  
+  // If it's already a Date object
+  if (timestamp instanceof Date) {
+    return timestamp;
+  }
+  
+  // If it has toDate method (Firestore Timestamp object)
+  if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+    return timestamp.toDate();
+  }
+  
+  // If it's a serialized Firestore Timestamp (from JSON)
+  if (timestamp.seconds) {
+    return new Date(timestamp.seconds * 1000);
+  }
+  
+  // Try to parse as Date string
+  return new Date(timestamp);
+}
+
 export default function Profile() {
   const { currentUser } = useAuth()
   const [profile, setProfile] = useState(null)
@@ -20,13 +43,20 @@ export default function Profile() {
     try {
       setLoading(true)
       const res = await authAPI.getProfile()
-      setProfile(res.data.voter)
+      const voterData = res.data.voter || {}
+      setProfile(voterData)
       setFormData({
-        address: res.data.voter.address || '',
-        phoneNumber: res.data.voter.phoneNumber || ''
+        address: voterData.address || '',
+        phoneNumber: voterData.phoneNumber || ''
       })
     } catch (error) {
       console.error('Fetch profile error:', error)
+      // Set empty profile on error
+      setProfile({
+        registered: false,
+        isVerified: false,
+        isEligible: false
+      })
     } finally {
       setLoading(false)
     }
@@ -188,7 +218,7 @@ export default function Profile() {
             <span style={styles.infoLabel}>Registered</span>
             <span style={styles.infoValue}>
               {profile?.registeredAt ? 
-                new Date(profile.registeredAt.toDate()).toLocaleDateString() : 
+                convertTimestampToDate(profile.registeredAt)?.toLocaleDateString() || 'N/A' : 
                 'N/A'}
             </span>
           </div>
