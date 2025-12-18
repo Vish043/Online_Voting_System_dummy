@@ -76,12 +76,23 @@ router.post('/register', verifyToken, async (req, res) => {
 // Get User Profile
 router.get('/profile', verifyToken, async (req, res) => {
   try {
-    const { uid } = req.user;
+    const { uid, email } = req.user;
     
     const voterDoc = await db.collection(collections.VOTER_REGISTRY).doc(uid).get();
     
     if (!voterDoc.exists) {
-      return res.status(404).json({ error: 'Profile not found' });
+      // Return empty profile structure if not registered as voter yet
+      return res.json({ 
+        voter: {
+          uid,
+          email,
+          firstName: '',
+          lastName: '',
+          isVerified: false,
+          isEligible: false,
+          registered: false
+        }
+      });
     }
 
     const voterData = voterDoc.data();

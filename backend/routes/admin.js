@@ -20,17 +20,51 @@ router.get('/voters', async (req, res) => {
       query = query.where('isVerified', '==', true);
     }
 
-    const votersSnapshot = await query.orderBy('registeredAt', 'desc').get();
+    // Try with orderBy first, if it fails due to missing index, fetch without orderBy
+    let votersSnapshot;
+    try {
+      votersSnapshot = await query.orderBy('registeredAt', 'desc').get();
+    } catch (orderByError) {
+      // If orderBy fails (likely missing index), fetch without orderBy and sort in memory
+      console.warn('OrderBy failed, fetching without orderBy:', orderByError.message);
+      votersSnapshot = await query.get();
+    }
 
     const voters = [];
     votersSnapshot.forEach(doc => {
       voters.push({ id: doc.id, ...doc.data() });
     });
 
+    // Sort by registeredAt in memory if orderBy failed
+    if (voters.length > 0 && voters[0].registeredAt) {
+      voters.sort((a, b) => {
+        const dateA = a.registeredAt?.toDate ? a.registeredAt.toDate() : 
+                     (a.registeredAt?.seconds ? new Date(a.registeredAt.seconds * 1000) : new Date(0));
+        const dateB = b.registeredAt?.toDate ? b.registeredAt.toDate() : 
+                     (b.registeredAt?.seconds ? new Date(b.registeredAt.seconds * 1000) : new Date(0));
+        return dateB - dateA; // Descending order
+      });
+    }
+
     res.json({ voters });
   } catch (error) {
     console.error('Fetch voters error:', error);
-    res.status(500).json({ error: 'Failed to fetch voters' });
+    console.error('Error details:', error.message);
+    console.error('Error code:', error.code);
+    
+    // Check if it's a Firestore index error
+    if (error.code === 9 || error.message?.includes('index')) {
+      console.error('⚠️  Firestore index required!');
+      console.error('The query requires a composite index.');
+      console.error('Index needed: voterRegistry collection with isVerified (ASC) and registeredAt (DESC)');
+      console.error('Check firestore.indexes.json and deploy it using: firebase deploy --only firestore:indexes');
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to fetch voters',
+      details: error.message,
+      code: error.code
+    });
   }
 });
 
