@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 import { electionsAPI } from '../services/api'
-import { ArrowLeft, TrendingUp, Award } from 'lucide-react'
+import { ArrowLeft, TrendingUp, Award, AlertCircle, CheckCircle } from 'lucide-react'
 
 export default function Results() {
   const { electionId } = useParams()
   const navigate = useNavigate()
+  const { isAdmin } = useAuth()
   const [election, setElection] = useState(null)
   const [results, setResults] = useState([])
   const [totalVotes, setTotalVotes] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [pendingApproval, setPendingApproval] = useState(false)
 
   useEffect(() => {
     fetchResults()
@@ -19,13 +22,20 @@ export default function Results() {
   async function fetchResults() {
     try {
       setLoading(true)
+      setError('')
+      setPendingApproval(false)
       const res = await electionsAPI.getResults(electionId)
       setElection(res.data.election)
       setResults(res.data.results)
       setTotalVotes(res.data.totalVotes)
     } catch (error) {
       console.error('Fetch results error:', error)
-      setError(error.message || 'Failed to load results')
+      if (error.response?.status === 403 && error.response?.data?.resultsApproved === false) {
+        setPendingApproval(true)
+        setError('Results are pending admin approval. Please check back later.')
+      } else {
+        setError(error.message || 'Failed to load results')
+      }
     } finally {
       setLoading(false)
     }
@@ -39,7 +49,7 @@ export default function Results() {
     )
   }
 
-  if (error) {
+  if (error && !pendingApproval) {
     return (
       <div className="container" style={styles.container}>
         <div className="alert alert-error">
@@ -49,6 +59,30 @@ export default function Results() {
           <ArrowLeft size={18} />
           Go Back
         </button>
+      </div>
+    )
+  }
+
+  if (pendingApproval) {
+    return (
+      <div className="container" style={styles.container}>
+        <button onClick={() => navigate(-1)} className="btn btn-outline" style={styles.backBtn}>
+          <ArrowLeft size={18} />
+          Back
+        </button>
+        <div className="card" style={styles.pendingCard}>
+          <AlertCircle size={64} style={styles.pendingIcon} />
+          <h1 style={styles.pendingTitle}>Results Pending Approval</h1>
+          <p style={styles.pendingText}>
+            The election results for <strong>{election?.title || 'this election'}</strong> are currently pending admin approval.
+          </p>
+          <p style={styles.pendingText}>
+            Once an administrator reviews and approves the results, they will be made available to all voters.
+          </p>
+          <p style={styles.pendingSubtext}>
+            Please check back later.
+          </p>
+        </div>
       </div>
     )
   }
@@ -315,6 +349,33 @@ const styles = {
   resultPercentage: {
     fontWeight: 600,
     color: 'var(--primary-color)'
+  },
+  pendingCard: {
+    textAlign: 'center',
+    padding: '3rem 2rem',
+    maxWidth: '600px',
+    margin: '0 auto'
+  },
+  pendingIcon: {
+    color: 'var(--warning-color)',
+    marginBottom: '1.5rem'
+  },
+  pendingTitle: {
+    fontSize: '1.75rem',
+    marginBottom: '1rem',
+    color: 'var(--text-primary)'
+  },
+  pendingText: {
+    fontSize: '1rem',
+    color: 'var(--text-secondary)',
+    marginBottom: '1rem',
+    lineHeight: '1.6'
+  },
+  pendingSubtext: {
+    fontSize: '0.875rem',
+    color: 'var(--text-secondary)',
+    fontStyle: 'italic',
+    marginTop: '1.5rem'
   }
 }
 

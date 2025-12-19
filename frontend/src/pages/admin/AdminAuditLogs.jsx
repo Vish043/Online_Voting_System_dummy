@@ -2,6 +2,29 @@ import { useState, useEffect } from 'react'
 import { adminAPI } from '../../services/api'
 import { FileText, Filter, AlertCircle } from 'lucide-react'
 
+// Helper function to convert Firestore Timestamp to Date
+function convertTimestampToDate(timestamp) {
+  if (!timestamp) return null;
+  
+  // If it's already a Date object
+  if (timestamp instanceof Date) {
+    return timestamp;
+  }
+  
+  // If it has toDate method (Firestore Timestamp object)
+  if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+    return timestamp.toDate();
+  }
+  
+  // If it's a serialized Firestore Timestamp (from JSON)
+  if (timestamp.seconds) {
+    return new Date(timestamp.seconds * 1000);
+  }
+  
+  // Try to parse as Date string
+  return new Date(timestamp);
+}
+
 export default function AdminAuditLogs() {
   const [logs, setLogs] = useState([])
   const [filter, setFilter] = useState('')
@@ -108,7 +131,7 @@ export default function AdminAuditLogs() {
                   <tr key={log.id}>
                     <td style={styles.timestamp}>
                       {log.timestamp ? 
-                        new Date(log.timestamp.toDate()).toLocaleString() : 
+                        convertTimestampToDate(log.timestamp)?.toLocaleString() || 'N/A' : 
                         'N/A'}
                     </td>
                     <td>

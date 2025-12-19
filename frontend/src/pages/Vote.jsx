@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 import { electionsAPI, votesAPI } from '../services/api'
-import { AlertCircle, CheckCircle, Users, ArrowLeft } from 'lucide-react'
+import { AlertCircle, CheckCircle, Users, ArrowLeft, Shield } from 'lucide-react'
 
 export default function Vote() {
   const { electionId } = useParams()
   const navigate = useNavigate()
+  const { isAdmin } = useAuth()
   const [election, setElection] = useState(null)
   const [candidates, setCandidates] = useState([])
   const [selectedCandidate, setSelectedCandidate] = useState(null)
@@ -13,6 +15,15 @@ export default function Vote() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+
+  useEffect(() => {
+    if (isAdmin) {
+      setError('Administrators cannot vote in elections. Redirecting...')
+      setTimeout(() => {
+        navigate(`/elections/${electionId}`)
+      }, 3000)
+    }
+  }, [isAdmin, electionId, navigate])
 
   useEffect(() => {
     fetchElectionData()
@@ -68,6 +79,27 @@ export default function Vote() {
     return (
       <div className="loading-container">
         <div className="spinner"></div>
+      </div>
+    )
+  }
+
+  if (isAdmin) {
+    return (
+      <div className="container" style={styles.container}>
+        <button onClick={() => navigate(-1)} className="btn btn-outline" style={styles.backBtn}>
+          <ArrowLeft size={18} />
+          Back
+        </button>
+        <div className="card" style={styles.header}>
+          <Shield size={64} style={{ color: 'var(--warning-color)', marginBottom: '1rem' }} />
+          <h1 style={styles.title}>Administrator Access Restricted</h1>
+          <p style={styles.description}>
+            As an administrator, you cannot vote in elections. This ensures the integrity and fairness of the voting process.
+          </p>
+          <p style={styles.description}>
+            Redirecting you to the election details page...
+          </p>
+        </div>
       </div>
     )
   }

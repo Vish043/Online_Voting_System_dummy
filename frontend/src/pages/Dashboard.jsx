@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { authAPI, electionsAPI, votesAPI } from '../services/api'
-import { Vote, Calendar, CheckCircle, AlertCircle, Clock, TrendingUp } from 'lucide-react'
+import { Vote, Calendar, CheckCircle, AlertCircle, Clock, TrendingUp, Award } from 'lucide-react'
 
 export default function Dashboard() {
-  const { currentUser } = useAuth()
+  const { currentUser, isAdmin } = useAuth()
   const [status, setStatus] = useState(null)
   const [elections, setElections] = useState([])
+  const [completedElections, setCompletedElections] = useState([])
   const [votingHistory, setVotingHistory] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -19,18 +20,41 @@ export default function Dashboard() {
     try {
       setLoading(true)
       
-      // Fetch voter status
-      const statusRes = await authAPI.getStatus()
-      setStatus(statusRes.data)
+      // Fetch voter status (only for non-admin users)
+      if (!isAdmin) {
+        try {
+          const statusRes = await authAPI.getStatus()
+          setStatus(statusRes.data)
 
-      // Fetch active elections
+          // Fetch voting history if eligible
+          if (statusRes.data.eligible) {
+            try {
+              const historyRes = await votesAPI.getHistory()
+              setVotingHistory(historyRes.data.votingHistory)
+            } catch (historyError) {
+              console.warn('Failed to fetch voting history:', historyError)
+            }
+          }
+        } catch (statusError) {
+          // If status check fails, set default status
+          console.warn('Failed to fetch voter status:', statusError)
+          setStatus({ registered: false, verified: false, eligible: false })
+        }
+      }
+
+      // Fetch active elections (for both admins and regular users)
       const electionsRes = await electionsAPI.getActive()
       setElections(electionsRes.data.elections)
 
-      // Fetch voting history if eligible
-      if (statusRes.data.eligible) {
-        const historyRes = await votesAPI.getHistory()
-        setVotingHistory(historyRes.data.votingHistory)
+      // Fetch completed elections with approved results (for non-admin users)
+      if (!isAdmin) {
+        try {
+          const completedRes = await electionsAPI.getCompleted()
+          setCompletedElections(completedRes.data.elections || [])
+        } catch (completedError) {
+          console.warn('Failed to fetch completed elections:', completedError)
+          setCompletedElections([])
+        }
       }
     } catch (error) {
       console.error('Dashboard data fetch error:', error)
@@ -50,41 +74,61 @@ export default function Dashboard() {
   return (
     <div className="container" style={styles.container}>
       <h1 style={styles.pageTitle}>Dashboard</h1>
-      <p style={styles.welcome}>Welcome, {currentUser?.displayName || currentUser?.email}!</p>
+      <p style={styles.welcome}>
+        Welcome, {currentUser?.displayName || currentUser?.email}!
+        {isAdmin && <span style={styles.adminBadge}> (Administrator)</span>}
+      </p>
 
-      {/* Status Cards */}
-      <div className="grid grid-3" style={styles.statusGrid}>
-        <StatusCard
-          icon={<CheckCircle size={32} />}
-          title="Registration"
-          status={status?.registered ? 'Registered' : 'Not Registered'}
-          color={status?.registered ? 'success' : 'danger'}
-        />
-        <StatusCard
-          icon={<AlertCircle size={32} />}
-          title="Verification"
-          status={status?.verified ? 'Verified' : 'Pending'}
-          color={status?.verified ? 'success' : 'warning'}
-        />
-        <StatusCard
-          icon={<Vote size={32} />}
-          title="Eligibility"
-          status={status?.eligible ? 'Eligible' : 'Not Eligible'}
-          color={status?.eligible ? 'success' : 'danger'}
-        />
-      </div>
-
-      {/* Verification Notice */}
-      {status?.registered && !status?.verified && (
-        <div className="alert alert-warning" style={styles.alert}>
+      {/* Admin Notice */}
+      {isAdmin && (
+        <div className="alert alert-info" style={styles.alert}>
           <AlertCircle size={20} />
           <div>
-            <strong>Verification Pending</strong>
+            <strong>Administrator Access</strong>
             <p style={styles.alertText}>
-              Your voter registration is pending admin verification. You'll be able to vote once your identity is verified.
+              As an administrator, you can view elections but cannot vote. Use the Admin panel to manage the system.
             </p>
           </div>
         </div>
+      )}
+
+      {/* Status Cards - Only show for non-admin users */}
+      {!isAdmin && (
+        <>
+          <div className="grid grid-3" style={styles.statusGrid}>
+            <StatusCard
+              icon={<CheckCircle size={32} />}
+              title="Registration"
+              status={status?.registered ? 'Registered' : 'Not Registered'}
+              color={status?.registered ? 'success' : 'danger'}
+            />
+            <StatusCard
+              icon={<AlertCircle size={32} />}
+              title="Verification"
+              status={status?.verified ? 'Verified' : 'Pending'}
+              color={status?.verified ? 'success' : 'warning'}
+            />
+            <StatusCard
+              icon={<Vote size={32} />}
+              title="Eligibility"
+              status={status?.eligible ? 'Eligible' : 'Not Eligible'}
+              color={status?.eligible ? 'success' : 'danger'}
+            />
+          </div>
+
+          {/* Verification Notice */}
+          {status?.registered && !status?.verified && (
+            <div className="alert alert-warning" style={styles.alert}>
+              <AlertCircle size={20} />
+              <div>
+                <strong>Verification Pending</strong>
+                <p style={styles.alertText}>
+                  Your voter registration is pending admin verification. You'll be able to vote once your identity is verified.
+                </p>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Active Elections */}
@@ -105,14 +149,59 @@ export default function Dashboard() {
         ) : (
           <div className="grid grid-2">
             {elections.slice(0, 4).map((election) => (
-              <ElectionCard key={election.id} election={election} eligible={status?.eligible} />
+              <ElectionCard 
+                key={election.id} 
+                election={election} 
+                eligible={status?.eligible} 
+                isAdmin={currentUser && isAdmin}
+              />
             ))}
           </div>
         )}
       </section>
 
-      {/* Voting History */}
-      {status?.eligible && (
+      {/* Election Results - Only show for non-admin users */}
+      {!isAdmin && completedElections.length > 0 && (
+        <section style={styles.section}>
+          <div style={styles.sectionHeader}>
+            <h2 style={styles.sectionTitle}>Election Results</h2>
+            <Link to="/elections?tab=completed" className="btn btn-outline">
+              View All Results
+            </Link>
+          </div>
+          <div className="grid grid-2">
+            {completedElections.slice(0, 4).map((election) => {
+              const endDate = convertTimestampToDate(election.endDate);
+              return (
+                <div key={election.id} className="card" style={styles.resultCard}>
+                  <div style={styles.resultCardHeader}>
+                    <h3 style={styles.resultCardTitle}>{election.title}</h3>
+                    <span className="badge badge-info">Completed</span>
+                  </div>
+                  <p style={styles.resultCardDesc}>{election.description}</p>
+                  <div style={styles.resultCardFooter}>
+                    <div style={styles.resultCardDate}>
+                      <Calendar size={16} />
+                      <span>Ended: {endDate ? endDate.toLocaleDateString() : 'N/A'}</span>
+                    </div>
+                    <Link 
+                      to={`/results/${election.id}`} 
+                      className="btn btn-primary"
+                      style={styles.resultCardBtn}
+                    >
+                      <Award size={16} />
+                      View Results
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Voting History - Only show for non-admin users */}
+      {!isAdmin && status?.eligible && (
         <section style={styles.section}>
           <h2 style={styles.sectionTitle}>Your Voting History</h2>
           {votingHistory.length === 0 ? (
@@ -124,24 +213,20 @@ export default function Dashboard() {
           ) : (
             <div className="card">
               <div style={styles.historyList}>
-                {votingHistory.map((vote, index) => (
-                  <div key={index} style={styles.historyItem}>
-                    <div>
-                      <strong>{vote.electionTitle}</strong>
-                      <p style={styles.historyDate}>
-                        {(() => {
-                          const date = vote.votedAt?.toDate ? 
-                            vote.votedAt.toDate() : 
-                            (vote.votedAt?.seconds ? 
-                              new Date(vote.votedAt.seconds * 1000) : 
-                              new Date(vote.votedAt));
-                          return date.toLocaleDateString();
-                        })()}
-                      </p>
+                {votingHistory.map((vote, index) => {
+                  const votedDate = convertTimestampToDate(vote.votedAt);
+                  return (
+                    <div key={index} style={styles.historyItem}>
+                      <div>
+                        <strong>{vote.electionTitle}</strong>
+                        <p style={styles.historyDate}>
+                          {votedDate ? votedDate.toLocaleDateString() : 'N/A'}
+                        </p>
+                      </div>
+                      <span className="badge badge-success">Voted</span>
                     </div>
-                    <span className="badge badge-success">Voted</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -188,7 +273,7 @@ function convertTimestampToDate(timestamp) {
   return new Date(timestamp);
 }
 
-function ElectionCard({ election, eligible }) {
+function ElectionCard({ election, eligible, isAdmin }) {
   const endDate = convertTimestampToDate(election.endDate);
   
   return (
@@ -205,10 +290,10 @@ function ElectionCard({ election, eligible }) {
         </div>
         <Link 
           to={`/elections/${election.id}`} 
-          className={`btn ${eligible ? 'btn-primary' : 'btn-outline'}`}
+          className={`btn ${eligible && !isAdmin ? 'btn-primary' : 'btn-outline'}`}
           style={styles.electionBtn}
         >
-          {eligible ? 'Vote Now' : 'View Details'}
+          {isAdmin ? 'View Details (Admin)' : eligible ? 'Vote Now' : 'View Details'}
         </Link>
       </div>
     </div>
@@ -226,6 +311,11 @@ const styles = {
   welcome: {
     color: 'var(--text-secondary)',
     marginBottom: '2rem'
+  },
+  adminBadge: {
+    color: 'var(--warning-color)',
+    fontWeight: 600,
+    marginLeft: '0.5rem'
   },
   statusGrid: {
     marginBottom: '2rem'
@@ -326,6 +416,49 @@ const styles = {
     fontSize: '0.875rem',
     color: 'var(--text-secondary)',
     marginTop: '0.25rem'
+  },
+  resultCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%'
+  },
+  resultCardHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'start',
+    marginBottom: '0.75rem'
+  },
+  resultCardTitle: {
+    fontSize: '1.125rem',
+    marginBottom: '0.5rem',
+    flex: 1
+  },
+  resultCardDesc: {
+    color: 'var(--text-secondary)',
+    marginBottom: '1rem',
+    flex: 1
+  },
+  resultCardFooter: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: '1rem',
+    borderTop: '1px solid var(--border-color)',
+    marginTop: 'auto'
+  },
+  resultCardDate: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    color: 'var(--text-secondary)',
+    fontSize: '0.875rem'
+  },
+  resultCardBtn: {
+    fontSize: '0.875rem',
+    padding: '0.5rem 1rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem'
   }
 }
 

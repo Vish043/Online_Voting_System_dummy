@@ -34,10 +34,12 @@ export default function Navbar() {
                 <BarChart3 size={18} />
                 Elections
               </Link>
-              <Link to="/profile" style={styles.link}>
-                <User size={18} />
-                Profile
-              </Link>
+              {!isAdmin && (
+                <Link to="/profile" style={styles.link}>
+                  <User size={18} />
+                  Profile
+                </Link>
+              )}
               {isAdmin && (
                 <Link to="/admin" style={styles.adminLink}>
                   <Shield size={18} />

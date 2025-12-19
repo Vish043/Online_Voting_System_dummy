@@ -72,6 +72,7 @@ export const authAPI = {
 export const electionsAPI = {
   getActive: () => api.get('/elections'),
   getUpcoming: () => api.get('/elections/upcoming'),
+  getCompleted: () => api.get('/elections/completed'),
   getById: (id) => api.get(`/elections/${id}`),
   checkVoted: (id) => api.get(`/elections/${id}/voted`),
   getResults: (id) => api.get(`/elections/${id}/results`)
@@ -97,7 +98,9 @@ export const adminAPI = {
   getAuditLogs: (limit, action) => 
     api.get(`/admin/audit-logs?limit=${limit || 100}&action=${action || ''}`),
   getStatistics: () => api.get('/admin/statistics'),
-  setAdmin: (userId) => api.post('/admin/set-admin', { userId })
+  setAdmin: (userId) => api.post('/admin/set-admin', { userId }),
+  approveResults: (electionId, approved) => 
+    api.post(`/admin/elections/${electionId}/approve-results`, { approved })
 }
 
 export default api

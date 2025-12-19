@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { authAPI } from '../services/api'
 import { User, Mail, Phone, MapPin, Calendar, CheckCircle, AlertCircle } from 'lucide-react'
@@ -27,7 +28,8 @@ function convertTimestampToDate(timestamp) {
 }
 
 export default function Profile() {
-  const { currentUser } = useAuth()
+  const { currentUser, isAdmin } = useAuth()
+  const navigate = useNavigate()
   const [profile, setProfile] = useState(null)
   const [isEditing, setIsEditing] = useState(false)
   const [formData, setFormData] = useState({ address: '', phoneNumber: '' })
@@ -36,8 +38,18 @@ export default function Profile() {
   const [message, setMessage] = useState({ type: '', text: '' })
 
   useEffect(() => {
+    // Redirect admins away from profile page
+    if (isAdmin) {
+      navigate('/admin')
+      return
+    }
     fetchProfile()
-  }, [])
+  }, [isAdmin, navigate])
+
+  // Don't render anything if admin (will redirect)
+  if (isAdmin) {
+    return null
+  }
 
   async function fetchProfile() {
     try {
@@ -217,9 +229,17 @@ export default function Profile() {
           <div style={styles.infoItem}>
             <span style={styles.infoLabel}>Registered</span>
             <span style={styles.infoValue}>
-              {profile?.registeredAt ? 
-                convertTimestampToDate(profile.registeredAt)?.toLocaleDateString() || 'N/A' : 
-                'N/A'}
+              {(() => {
+                if (!profile?.registeredAt) return 'N/A';
+                const date = convertTimestampToDate(profile.registeredAt);
+                if (!date) return 'N/A';
+                try {
+                  const dateStr = date.toLocaleDateString();
+                  return dateStr === 'Invalid Date' ? 'N/A' : dateStr;
+                } catch (e) {
+                  return 'N/A';
+                }
+              })()}
             </span>
           </div>
           <div style={styles.infoItem}>

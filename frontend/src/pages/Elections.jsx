@@ -1,11 +1,35 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { electionsAPI } from '../services/api'
-import { Calendar, Clock, TrendingUp } from 'lucide-react'
+import { Calendar, Clock, TrendingUp, Award } from 'lucide-react'
+
+// Helper function to convert Firestore Timestamp to Date
+function convertTimestampToDate(timestamp) {
+  if (!timestamp) return null;
+  
+  // If it's already a Date object
+  if (timestamp instanceof Date) {
+    return timestamp;
+  }
+  
+  // If it has toDate method (Firestore Timestamp object)
+  if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+    return timestamp.toDate();
+  }
+  
+  // If it's a serialized Firestore Timestamp (from JSON)
+  if (timestamp.seconds) {
+    return new Date(timestamp.seconds * 1000);
+  }
+  
+  // Try to parse as Date string
+  return new Date(timestamp);
+}
 
 export default function Elections() {
   const [activeElections, setActiveElections] = useState([])
   const [upcomingElections, setUpcomingElections] = useState([])
+  const [completedElections, setCompletedElections] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('active')
 
@@ -16,12 +40,14 @@ export default function Elections() {
   async function fetchElections() {
     try {
       setLoading(true)
-      const [activeRes, upcomingRes] = await Promise.all([
+      const [activeRes, upcomingRes, completedRes] = await Promise.all([
         electionsAPI.getActive(),
-        electionsAPI.getUpcoming()
+        electionsAPI.getUpcoming(),
+        electionsAPI.getCompleted().catch(() => ({ data: { elections: [] } }))
       ])
       setActiveElections(activeRes.data.elections)
       setUpcomingElections(upcomingRes.data.elections)
+      setCompletedElections(completedRes.data.elections)
     } catch (error) {
       console.error('Fetch elections error:', error)
     } finally {
@@ -37,12 +63,14 @@ export default function Elections() {
     )
   }
 
-  const elections = tab === 'active' ? activeElections : upcomingElections
+  const elections = tab === 'active' ? activeElections : 
+                   tab === 'upcoming' ? upcomingElections : 
+                   completedElections
 
   return (
     <div className="container" style={styles.container}>
       <h1 style={styles.pageTitle}>Elections</h1>
-      <p style={styles.subtitle}>Browse and participate in active elections</p>
+      <p style={styles.subtitle}>Browse and participate in elections</p>
 
       {/* Tabs */}
       <div style={styles.tabs}>
@@ -60,6 +88,13 @@ export default function Elections() {
           <Clock size={18} />
           Upcoming ({upcomingElections.length})
         </button>
+        <button
+          style={{...styles.tab, ...(tab === 'completed' ? styles.activeTab : {})}}
+          onClick={() => setTab('completed')}
+        >
+          <Award size={18} />
+          Results ({completedElections.length})
+        </button>
       </div>
 
       {/* Elections Grid */}
@@ -72,7 +107,12 @@ export default function Elections() {
       ) : (
         <div className="grid grid-2">
           {elections.map((election) => (
-            <ElectionCard key={election.id} election={election} isActive={tab === 'active'} />
+            <ElectionCard 
+              key={election.id} 
+              election={election} 
+              isActive={tab === 'active'} 
+              isCompleted={tab === 'completed'}
+            />
           ))}
         </div>
       )}
@@ -80,15 +120,15 @@ export default function Elections() {
   )
 }
 
-function ElectionCard({ election, isActive }) {
-  const startDate = election.startDate?.toDate ? new Date(election.startDate.toDate()) : new Date(election.startDate)
-  const endDate = election.endDate?.toDate ? new Date(election.endDate.toDate()) : new Date(election.endDate)
+function ElectionCard({ election, isActive, isCompleted }) {
+  const startDate = convertTimestampToDate(election.startDate);
+  const endDate = convertTimestampToDate(election.endDate);
 
   return (
     <div className="card" style={styles.electionCard}>
       <div style={styles.cardHeader}>
-        <span className={`badge ${isActive ? 'badge-success' : 'badge-info'}`}>
-          {isActive ? 'Active' : 'Upcoming'}
+        <span className={`badge ${isActive ? 'badge-success' : isCompleted ? 'badge-info' : 'badge-info'}`}>
+          {isActive ? 'Active' : isCompleted ? 'Completed' : 'Upcoming'}
         </span>
         <span style={styles.electionType}>{election.type}</span>
       </div>
@@ -101,25 +141,37 @@ function ElectionCard({ election, isActive }) {
           <Calendar size={16} />
           <div>
             <small style={styles.dateLabel}>Start Date</small>
-            <div>{startDate.toLocaleDateString()}</div>
+            <div>{startDate ? startDate.toLocaleDateString() : 'N/A'}</div>
           </div>
         </div>
         <div style={styles.date}>
           <Calendar size={16} />
           <div>
             <small style={styles.dateLabel}>End Date</small>
-            <div>{endDate.toLocaleDateString()}</div>
+            <div>{endDate ? endDate.toLocaleDateString() : 'N/A'}</div>
           </div>
         </div>
       </div>
 
-      <Link 
-        to={`/elections/${election.id}`} 
-        className="btn btn-primary" 
-        style={styles.viewBtn}
-      >
-        View Details
-      </Link>
+      <div style={styles.footer}>
+        <Link 
+          to={`/elections/${election.id}`} 
+          className="btn btn-outline" 
+          style={styles.viewBtn}
+        >
+          View Details
+        </Link>
+        {isCompleted && election.resultsApproved && (
+          <Link 
+            to={`/results/${election.id}`} 
+            className="btn btn-primary" 
+            style={styles.resultsBtn}
+          >
+            <Award size={16} />
+            View Results
+          </Link>
+        )}
+      </div>
     </div>
   )
 }
@@ -212,7 +264,18 @@ const styles = {
     fontSize: '0.75rem'
   },
   viewBtn: {
-    width: '100%'
+    flex: 1
+  },
+  footer: {
+    display: 'flex',
+    gap: '0.5rem',
+    marginTop: 'auto'
+  },
+  resultsBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    flex: 1
   }
 }
 

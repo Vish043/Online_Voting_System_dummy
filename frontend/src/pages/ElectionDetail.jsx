@@ -1,11 +1,36 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 import { electionsAPI } from '../services/api'
-import { Calendar, Users, CheckCircle, AlertCircle, ArrowLeft } from 'lucide-react'
+import { Calendar, Users, CheckCircle, AlertCircle, ArrowLeft, Shield } from 'lucide-react'
+
+// Helper function to convert Firestore Timestamp to Date
+function convertTimestampToDate(timestamp) {
+  if (!timestamp) return null;
+  
+  // If it's already a Date object
+  if (timestamp instanceof Date) {
+    return timestamp;
+  }
+  
+  // If it has toDate method (Firestore Timestamp object)
+  if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+    return timestamp.toDate();
+  }
+  
+  // If it's a serialized Firestore Timestamp (from JSON)
+  if (timestamp.seconds) {
+    return new Date(timestamp.seconds * 1000);
+  }
+  
+  // Try to parse as Date string
+  return new Date(timestamp);
+}
 
 export default function ElectionDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { isAdmin } = useAuth()
   const [election, setElection] = useState(null)
   const [candidates, setCandidates] = useState([])
   const [hasVoted, setHasVoted] = useState(false)
@@ -52,8 +77,8 @@ export default function ElectionDetail() {
   }
 
   const isActive = election.status === 'active'
-  const startDate = election.startDate?.toDate ? new Date(election.startDate.toDate()) : new Date(election.startDate)
-  const endDate = election.endDate?.toDate ? new Date(election.endDate.toDate()) : new Date(election.endDate)
+  const startDate = convertTimestampToDate(election.startDate)
+  const endDate = convertTimestampToDate(election.endDate)
 
   return (
     <div className="container" style={styles.container}>
@@ -78,14 +103,14 @@ export default function ElectionDetail() {
             <Calendar size={20} />
             <div>
               <small style={styles.metaLabel}>Start Date</small>
-              <div>{startDate.toLocaleDateString()}</div>
+              <div>{startDate ? startDate.toLocaleDateString() : 'N/A'}</div>
             </div>
           </div>
           <div style={styles.metaItem}>
             <Calendar size={20} />
             <div>
               <small style={styles.metaLabel}>End Date</small>
-              <div>{endDate.toLocaleDateString()}</div>
+              <div>{endDate ? endDate.toLocaleDateString() : 'N/A'}</div>
             </div>
           </div>
           <div style={styles.metaItem}>
@@ -119,8 +144,21 @@ export default function ElectionDetail() {
         </div>
       </section>
 
+      {/* Admin Notice */}
+      {isAdmin && isActive && (
+        <div className="alert alert-warning">
+          <Shield size={20} />
+          <div>
+            <strong>Administrator Notice</strong>
+            <p style={styles.alertText}>
+              As an administrator, you cannot vote in elections. This ensures the integrity and fairness of the voting process.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Vote Button */}
-      {isActive && !hasVoted && (
+      {isActive && !hasVoted && !isAdmin && (
         <div style={styles.voteSection}>
           <Link to={`/vote/${election.id}`} className="btn btn-primary" style={styles.voteBtn}>
             Cast Your Vote
@@ -128,12 +166,25 @@ export default function ElectionDetail() {
         </div>
       )}
 
-      {/* View Results Button */}
-      {election.status === 'completed' && (
+      {/* View Results Button - Only show if results are approved */}
+      {election.status === 'completed' && election.resultsApproved && (
         <div style={styles.voteSection}>
           <Link to={`/results/${election.id}`} className="btn btn-secondary" style={styles.voteBtn}>
             View Results
           </Link>
+        </div>
+      )}
+
+      {/* Results Pending Notice */}
+      {election.status === 'completed' && !election.resultsApproved && (
+        <div className="alert alert-warning">
+          <AlertCircle size={20} />
+          <div>
+            <strong>Results Pending Approval</strong>
+            <p style={styles.alertText}>
+              The election results are currently pending admin approval. Please check back later.
+            </p>
+          </div>
         </div>
       )}
     </div>
