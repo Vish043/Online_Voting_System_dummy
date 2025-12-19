@@ -3,6 +3,46 @@ const router = express.Router();
 const { admin, db, collections } = require('../config/firebase');
 const { verifyToken, verifyAdmin } = require('../middleware/auth');
 
+// Helper function to convert Firestore Timestamp to serializable format
+function serializeTimestamp(timestamp) {
+  if (!timestamp) return null;
+  
+  // If it's a Firestore Timestamp
+  if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+    return {
+      seconds: timestamp.seconds,
+      nanoseconds: timestamp.nanoseconds,
+      _timestamp: true // Flag to identify as timestamp
+    };
+  }
+  
+  // If it's already serialized
+  if (timestamp.seconds !== undefined) {
+    return timestamp;
+  }
+  
+  return timestamp;
+}
+
+// Helper function to serialize election data
+function serializeElection(electionData) {
+  const serialized = { ...electionData };
+  
+  if (serialized.startDate) {
+    serialized.startDate = serializeTimestamp(serialized.startDate);
+  }
+  
+  if (serialized.endDate) {
+    serialized.endDate = serializeTimestamp(serialized.endDate);
+  }
+  
+  if (serialized.createdAt) {
+    serialized.createdAt = serializeTimestamp(serialized.createdAt);
+  }
+  
+  return serialized;
+}
+
 // All routes require admin privileges
 router.use(verifyToken);
 router.use(verifyAdmin);
@@ -248,7 +288,7 @@ router.get('/elections', async (req, res) => {
 
     const elections = [];
     electionsSnapshot.forEach(doc => {
-      elections.push({ id: doc.id, ...doc.data() });
+      elections.push({ id: doc.id, ...serializeElection(doc.data()) });
     });
 
     res.json({ elections });
@@ -282,6 +322,60 @@ router.get('/audit-logs', async (req, res) => {
   } catch (error) {
     console.error('Fetch audit logs error:', error);
     res.status(500).json({ error: 'Failed to fetch audit logs' });
+  }
+});
+
+// Approve Election Results
+router.post('/elections/:electionId/approve-results', async (req, res) => {
+  try {
+    const { electionId } = req.params;
+    const { approved } = req.body;
+
+    if (typeof approved !== 'boolean') {
+      return res.status(400).json({ error: 'Missing or invalid approved field' });
+    }
+
+    // Verify election exists
+    const electionDoc = await db.collection(collections.ELECTIONS).doc(electionId).get();
+    
+    if (!electionDoc.exists) {
+      return res.status(404).json({ error: 'Election not found' });
+    }
+
+    const electionData = electionDoc.data();
+    const now = admin.firestore.Timestamp.now();
+
+    // Only allow approval if election has ended
+    if (electionData.endDate > now && electionData.status !== 'completed') {
+      return res.status(400).json({ error: 'Cannot approve results for ongoing elections' });
+    }
+
+    // Update results approval status
+    await db.collection(collections.ELECTIONS).doc(electionId).update({
+      resultsApproved: approved,
+      resultsApprovedAt: admin.firestore.FieldValue.serverTimestamp(),
+      resultsApprovedBy: req.user.uid
+    });
+
+    // Log audit
+    await db.collection(collections.AUDIT_LOGS).add({
+      action: approved ? 'RESULTS_APPROVED' : 'RESULTS_REJECTED',
+      adminId: req.user.uid,
+      electionId,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      details: { 
+        electionTitle: electionData.title,
+        approved 
+      }
+    });
+
+    res.json({ 
+      message: `Results ${approved ? 'approved' : 'rejected'} successfully`,
+      resultsApproved: approved 
+    });
+  } catch (error) {
+    console.error('Approve results error:', error);
+    res.status(500).json({ error: 'Failed to update results approval status' });
   }
 });
 

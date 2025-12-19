@@ -4,11 +4,45 @@ const { admin, db, collections } = require('../config/firebase');
 const { verifyToken, verifyVoterEligibility } = require('../middleware/auth');
 const crypto = require('crypto');
 
+// Helper function to serialize Firestore Timestamp
+function serializeTimestamp(timestamp) {
+  if (!timestamp) return null;
+  
+  // If it's a Firestore Timestamp
+  if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+    return {
+      seconds: timestamp.seconds,
+      nanoseconds: timestamp.nanoseconds,
+      _timestamp: true
+    };
+  }
+  
+  // If it's already serialized
+  if (timestamp.seconds !== undefined) {
+    return timestamp;
+  }
+  
+  return timestamp;
+}
+
 // Submit Vote
 router.post('/', verifyToken, verifyVoterEligibility, async (req, res) => {
   try {
     const { uid, email } = req.user;
     const { electionId, candidateId } = req.body;
+
+    // Double-check: Ensure admin cannot vote (additional safeguard)
+    try {
+      const userRecord = await admin.auth().getUser(uid);
+      const customClaims = userRecord.customClaims;
+      
+      if (customClaims && customClaims.role === 'admin') {
+        return res.status(403).json({ error: 'Administrators cannot vote in elections' });
+      }
+    } catch (adminCheckError) {
+      // If admin check fails, continue with vote submission
+      console.warn('Admin check failed during vote submission, continuing:', adminCheckError.message);
+    }
 
     if (!electionId || !candidateId) {
       return res.status(400).json({ error: 'Missing electionId or candidateId' });
@@ -121,8 +155,14 @@ router.get('/history', verifyToken, verifyVoterEligibility, async (req, res) => 
     }
 
     const { votingHistory } = voterDoc.data();
+    
+    // Serialize timestamps in voting history
+    const serializedHistory = (votingHistory || []).map(vote => ({
+      ...vote,
+      votedAt: serializeTimestamp(vote.votedAt)
+    }));
 
-    res.json({ votingHistory: votingHistory || [] });
+    res.json({ votingHistory: serializedHistory });
   } catch (error) {
     console.error('Voting history error:', error);
     res.status(500).json({ error: 'Failed to fetch voting history' });

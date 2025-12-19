@@ -3,6 +3,46 @@ const router = express.Router();
 const { admin, db, collections } = require('../config/firebase');
 const { verifyToken, verifyVoterEligibility } = require('../middleware/auth');
 
+// Helper function to convert Firestore Timestamp to serializable format
+function serializeTimestamp(timestamp) {
+  if (!timestamp) return null;
+  
+  // If it's a Firestore Timestamp
+  if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+    return {
+      seconds: timestamp.seconds,
+      nanoseconds: timestamp.nanoseconds,
+      _timestamp: true // Flag to identify as timestamp
+    };
+  }
+  
+  // If it's already serialized
+  if (timestamp.seconds !== undefined) {
+    return timestamp;
+  }
+  
+  return timestamp;
+}
+
+// Helper function to serialize election data
+function serializeElection(electionData) {
+  const serialized = { ...electionData };
+  
+  if (serialized.startDate) {
+    serialized.startDate = serializeTimestamp(serialized.startDate);
+  }
+  
+  if (serialized.endDate) {
+    serialized.endDate = serializeTimestamp(serialized.endDate);
+  }
+  
+  if (serialized.createdAt) {
+    serialized.createdAt = serializeTimestamp(serialized.createdAt);
+  }
+  
+  return serialized;
+}
+
 // Get All Active Elections
 router.get('/', verifyToken, async (req, res) => {
   try {
@@ -60,11 +100,11 @@ router.get('/', verifyToken, async (req, res) => {
         if (electionData.status === 'active' && 
             startDate && startDate <= currentDate && 
             endDate && endDate >= currentDate) {
-          elections.push({ id: electionId, ...electionData });
+          elections.push({ id: electionId, ...serializeElection(electionData) });
         }
       } else {
         // Already filtered by query
-        elections.push({ id: electionId, ...electionData });
+        elections.push({ id: electionId, ...serializeElection(electionData) });
       }
     });
 
@@ -81,6 +121,70 @@ router.get('/', verifyToken, async (req, res) => {
     }
     
     // Return empty array instead of error to prevent UI breakage
+    res.json({ elections: [] });
+  }
+});
+
+// Get Completed Elections (with approved results)
+router.get('/completed', verifyToken, async (req, res) => {
+  try {
+    const now = admin.firestore.Timestamp.now();
+    
+    let electionsSnapshot;
+    let needsFiltering = false;
+    
+    try {
+      // Try fetching completed elections
+      electionsSnapshot = await db.collection(collections.ELECTIONS)
+        .where('status', '==', 'completed')
+        .where('resultsApproved', '==', true)
+        .get();
+    } catch (queryError) {
+      // If query fails (missing index), fetch completed elections and filter in memory
+      console.warn('Complex query failed for completed elections, using fallback:', queryError.message);
+      
+      try {
+        // Try fetching just by status
+        electionsSnapshot = await db.collection(collections.ELECTIONS)
+          .where('status', '==', 'completed')
+          .get();
+        needsFiltering = true;
+      } catch (statusError) {
+        // If that also fails, fetch all and filter in memory
+        console.warn('Status query failed, fetching all elections:', statusError.message);
+        electionsSnapshot = await db.collection(collections.ELECTIONS).get();
+        needsFiltering = true;
+      }
+    }
+
+    const elections = [];
+    electionsSnapshot.forEach(doc => {
+      const electionData = doc.data();
+      const electionId = doc.id;
+      
+      // Filter by status and resultsApproved in memory if needed
+      if (needsFiltering) {
+        if (electionData.status === 'completed' && electionData.resultsApproved) {
+          elections.push({ id: electionId, ...serializeElection(electionData) });
+        }
+      } else {
+        // Already filtered by query
+        elections.push({ id: electionId, ...serializeElection(electionData) });
+      }
+    });
+
+    // Sort by endDate in descending order (most recent first)
+    if (elections.length > 0) {
+      elections.sort((a, b) => {
+        const dateA = a.endDate?.seconds ? new Date(a.endDate.seconds * 1000) : new Date(0);
+        const dateB = b.endDate?.seconds ? new Date(b.endDate.seconds * 1000) : new Date(0);
+        return dateB - dateA; // Descending order
+      });
+    }
+
+    res.json({ elections });
+  } catch (error) {
+    console.error('Fetch completed elections error:', error);
     res.json({ elections: [] });
   }
 });
@@ -134,21 +238,19 @@ router.get('/upcoming', verifyToken, async (req, res) => {
         
         // Only include if status is scheduled and startDate is in future
         if (electionData.status === 'scheduled' && startDate && startDate > new Date()) {
-          elections.push({ id: electionId, ...electionData });
+          elections.push({ id: electionId, ...serializeElection(electionData) });
         }
       } else {
         // Already filtered by query
-        elections.push({ id: electionId, ...electionData });
+        elections.push({ id: electionId, ...serializeElection(electionData) });
       }
     });
 
     // Sort by startDate in memory
     if (elections.length > 0) {
       elections.sort((a, b) => {
-        const dateA = a.startDate?.toDate ? a.startDate.toDate() : 
-                     (a.startDate?.seconds ? new Date(a.startDate.seconds * 1000) : new Date(0));
-        const dateB = b.startDate?.toDate ? b.startDate.toDate() : 
-                     (b.startDate?.seconds ? new Date(b.startDate.seconds * 1000) : new Date(0));
+        const dateA = a.startDate?.seconds ? new Date(a.startDate.seconds * 1000) : new Date(0);
+        const dateB = b.startDate?.seconds ? new Date(b.startDate.seconds * 1000) : new Date(0);
         return dateA - dateB; // Ascending order
       });
     }
@@ -215,7 +317,7 @@ router.get('/:electionId', verifyToken, async (req, res) => {
     }
 
     res.json({ 
-      election: { id: electionDoc.id, ...electionData },
+      election: { id: electionDoc.id, ...serializeElection(electionData) },
       candidates 
     });
   } catch (error) {
@@ -256,10 +358,11 @@ router.get('/:electionId/voted', verifyToken, async (req, res) => {
   }
 });
 
-// Get Election Results (only for ended elections)
+// Get Election Results (only for ended elections with admin approval)
 router.get('/:electionId/results', verifyToken, async (req, res) => {
   try {
     const { electionId } = req.params;
+    const { uid } = req.user;
 
     const electionDoc = await db.collection(collections.ELECTIONS).doc(electionId).get();
 
@@ -271,15 +374,64 @@ router.get('/:electionId/results', verifyToken, async (req, res) => {
     const now = admin.firestore.Timestamp.now();
 
     // Only show results if election has ended
-    if (electionData.endDate > now && electionData.status !== 'completed') {
-      return res.status(403).json({ error: 'Results not available yet' });
+    // Check if election has ended by comparing timestamps
+    try {
+      const endDate = electionData.endDate;
+      if (endDate) {
+        // Convert to comparable format if needed
+        let endDateTimestamp = endDate;
+        if (endDate.toDate && typeof endDate.toDate === 'function') {
+          // It's a Firestore Timestamp, use it directly
+          endDateTimestamp = endDate;
+        } else if (endDate.seconds) {
+          // It's a serialized timestamp, convert it
+          endDateTimestamp = admin.firestore.Timestamp.fromMillis(endDate.seconds * 1000);
+        }
+        
+        if (endDateTimestamp > now && electionData.status !== 'completed') {
+          return res.status(403).json({ error: 'Results not available yet' });
+        }
+      }
+    } catch (dateError) {
+      // If date comparison fails, allow access if status is completed
+      console.warn('Date comparison error, checking status only:', dateError.message);
+      if (electionData.status !== 'completed') {
+        return res.status(403).json({ error: 'Results not available yet' });
+      }
     }
 
-    // Get candidates with vote counts
-    const candidatesSnapshot = await db.collection(collections.CANDIDATES)
-      .where('electionId', '==', electionId)
-      .orderBy('voteCount', 'desc')
-      .get();
+    // Check if user is admin
+    let isAdmin = false;
+    try {
+      const userRecord = await admin.auth().getUser(uid);
+      const customClaims = userRecord.customClaims;
+      isAdmin = customClaims && customClaims.role === 'admin';
+    } catch (adminCheckError) {
+      // If admin check fails, continue as regular user
+    }
+
+    // For non-admin users, check if results are approved
+    if (!isAdmin && !electionData.resultsApproved) {
+      return res.status(403).json({ 
+        error: 'Results are pending admin approval',
+        resultsApproved: false 
+      });
+    }
+
+    // Get candidates with vote counts - try with orderBy first, fallback if index missing
+    let candidatesSnapshot;
+    try {
+      candidatesSnapshot = await db.collection(collections.CANDIDATES)
+        .where('electionId', '==', electionId)
+        .orderBy('voteCount', 'desc')
+        .get();
+    } catch (orderByError) {
+      // If orderBy fails (missing index), fetch without orderBy and sort in memory
+      console.warn('OrderBy failed for results, fetching without orderBy:', orderByError.message);
+      candidatesSnapshot = await db.collection(collections.CANDIDATES)
+        .where('electionId', '==', electionId)
+        .get();
+    }
 
     const results = [];
     let totalVotes = 0;
@@ -294,6 +446,15 @@ router.get('/:electionId/results', verifyToken, async (req, res) => {
       });
     });
 
+    // Sort by voteCount in memory if orderBy failed
+    if (results.length > 0) {
+      results.sort((a, b) => {
+        const votesA = a.voteCount || 0;
+        const votesB = b.voteCount || 0;
+        return votesB - votesA; // Descending order
+      });
+    }
+
     // Calculate percentages
     results.forEach(candidate => {
       candidate.percentage = totalVotes > 0 
@@ -302,13 +463,19 @@ router.get('/:electionId/results', verifyToken, async (req, res) => {
     });
 
     res.json({ 
-      election: { id: electionDoc.id, ...electionData },
+      election: { id: electionDoc.id, ...serializeElection(electionData) },
       results,
       totalVotes 
     });
   } catch (error) {
     console.error('Fetch results error:', error);
-    res.status(500).json({ error: 'Failed to fetch results' });
+    console.error('Error details:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to fetch results',
+      details: error.message 
+    });
   }
 });
 

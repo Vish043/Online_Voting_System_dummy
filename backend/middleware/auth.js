@@ -54,6 +54,19 @@ const verifyVoterEligibility = async (req, res, next) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
+    // Check if user is admin - admins cannot vote
+    try {
+      const userRecord = await admin.auth().getUser(req.user.uid);
+      const customClaims = userRecord.customClaims;
+      
+      if (customClaims && customClaims.role === 'admin') {
+        return res.status(403).json({ error: 'Administrators cannot vote in elections' });
+      }
+    } catch (adminCheckError) {
+      // If admin check fails, continue with voter eligibility check
+      console.warn('Admin check failed, continuing with voter check:', adminCheckError.message);
+    }
+
     // Check if user is verified and eligible to vote
     const { db, collections } = require('../config/firebase');
     const voterDoc = await db.collection(collections.VOTER_REGISTRY).doc(req.user.uid).get();

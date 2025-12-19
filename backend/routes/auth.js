@@ -3,10 +3,45 @@ const router = express.Router();
 const { admin, db, collections } = require('../config/firebase');
 const { verifyToken } = require('../middleware/auth');
 
+// Helper function to serialize Firestore Timestamp
+function serializeTimestamp(timestamp) {
+  if (!timestamp) return null;
+  
+  // If it's a Firestore Timestamp
+  if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+    return {
+      seconds: timestamp.seconds,
+      nanoseconds: timestamp.nanoseconds,
+      _timestamp: true
+    };
+  }
+  
+  // If it's already serialized
+  if (timestamp.seconds !== undefined) {
+    return timestamp;
+  }
+  
+  return timestamp;
+}
+
 // Register User
 router.post('/register', verifyToken, async (req, res) => {
   try {
     const { uid, email } = req.user;
+    
+    // Check if user is admin - admins cannot register as voters
+    try {
+      const userRecord = await admin.auth().getUser(uid);
+      const customClaims = userRecord.customClaims;
+      
+      if (customClaims && customClaims.role === 'admin') {
+        return res.status(403).json({ error: 'Administrators cannot register as voters' });
+      }
+    } catch (adminCheckError) {
+      // If admin check fails, continue with registration
+      console.warn('Admin check failed, continuing with registration:', adminCheckError.message);
+    }
+    
     const { 
       firstName, 
       lastName, 
@@ -78,6 +113,19 @@ router.get('/profile', verifyToken, async (req, res) => {
   try {
     const { uid, email } = req.user;
     
+    // Check if user is admin - admins cannot access profile
+    try {
+      const userRecord = await admin.auth().getUser(uid);
+      const customClaims = userRecord.customClaims;
+      
+      if (customClaims && customClaims.role === 'admin') {
+        return res.status(403).json({ error: 'Administrators cannot access voter profiles' });
+      }
+    } catch (adminCheckError) {
+      // If admin check fails, continue with profile fetch
+      console.warn('Admin check failed, continuing with profile fetch:', adminCheckError.message);
+    }
+    
     const voterDoc = await db.collection(collections.VOTER_REGISTRY).doc(uid).get();
     
     if (!voterDoc.exists) {
@@ -100,7 +148,22 @@ router.get('/profile', verifyToken, async (req, res) => {
     // Remove sensitive data
     delete voterData.nationalId;
     
-    res.json({ voter: voterData });
+    // Serialize timestamps
+    const serializedVoterData = {
+      ...voterData,
+      registeredAt: serializeTimestamp(voterData.registeredAt),
+      updatedAt: serializeTimestamp(voterData.updatedAt)
+    };
+    
+    // Serialize timestamps in voting history if it exists
+    if (serializedVoterData.votingHistory && Array.isArray(serializedVoterData.votingHistory)) {
+      serializedVoterData.votingHistory = serializedVoterData.votingHistory.map(vote => ({
+        ...vote,
+        votedAt: serializeTimestamp(vote.votedAt)
+      }));
+    }
+    
+    res.json({ voter: serializedVoterData });
   } catch (error) {
     console.error('Profile fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch profile' });
@@ -111,6 +174,20 @@ router.get('/profile', verifyToken, async (req, res) => {
 router.put('/profile', verifyToken, async (req, res) => {
   try {
     const { uid } = req.user;
+    
+    // Check if user is admin - admins cannot update profile
+    try {
+      const userRecord = await admin.auth().getUser(uid);
+      const customClaims = userRecord.customClaims;
+      
+      if (customClaims && customClaims.role === 'admin') {
+        return res.status(403).json({ error: 'Administrators cannot update voter profiles' });
+      }
+    } catch (adminCheckError) {
+      // If admin check fails, continue with profile update
+      console.warn('Admin check failed, continuing with profile update:', adminCheckError.message);
+    }
+    
     const { address, phoneNumber } = req.body;
 
     const updateData = {
@@ -133,6 +210,19 @@ router.put('/profile', verifyToken, async (req, res) => {
 router.get('/status', verifyToken, async (req, res) => {
   try {
     const { uid } = req.user;
+    
+    // Check if user is admin - admins cannot check voter status
+    try {
+      const userRecord = await admin.auth().getUser(uid);
+      const customClaims = userRecord.customClaims;
+      
+      if (customClaims && customClaims.role === 'admin') {
+        return res.status(403).json({ error: 'Administrators cannot check voter status' });
+      }
+    } catch (adminCheckError) {
+      // If admin check fails, continue with status check
+      console.warn('Admin check failed, continuing with status check:', adminCheckError.message);
+    }
     
     const voterDoc = await db.collection(collections.VOTER_REGISTRY).doc(uid).get();
     
