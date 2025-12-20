@@ -165,3 +165,41 @@ node scripts/set-admin.js your-email@example.com
 
 Then sign out and sign back in! 🎉
 
+
+State / UT	# of Assembly Constituencies
+Andhra Pradesh	175 
+Wikipedia
+
+Arunachal Pradesh	60 (total)
+Assam	126
+Bihar	243
+Chhattisgarh	90
+Goa	40
+Gujarat	182
+Haryana	90
+Himachal Pradesh	68
+Jharkhand	81
+Karnataka	224
+Kerala	140
+Madhya Pradesh	230
+Maharashtra	288
+Manipur	60
+Meghalaya	60
+Mizoram	40
+Nagaland	60
+Odisha	147
+Punjab	117 
+Wikipedia
+
+Rajasthan	200
+Sikkim	32
+Tamil Nadu	234
+Telangana	119
+Tripura	60
+Uttar Pradesh	403
+Uttarakhand	70
+West Bengal	294
+
+Delhi (NCT)	70
+Puducherry	30
+Jammu & Kashmir	90
