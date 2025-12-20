@@ -48,12 +48,16 @@ router.post('/register', verifyToken, async (req, res) => {
       dateOfBirth, 
       nationalId, 
       address, 
-      phoneNumber 
+      phoneNumber,
+      state,
+      district,
+      ward,
+      constituency
     } = req.body;
 
     // Validate required fields
-    if (!firstName || !lastName || !dateOfBirth || !nationalId) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    if (!firstName || !lastName || !dateOfBirth || !nationalId || !state || !district || !ward) {
+      return res.status(400).json({ error: 'Missing required fields. State, District, and Ward are required.' });
     }
 
     // Check if user already registered
@@ -81,6 +85,10 @@ router.post('/register', verifyToken, async (req, res) => {
       nationalId,
       address: address || '',
       phoneNumber: phoneNumber || '',
+      state: state.trim(),
+      district: district.trim(),
+      ward: ward.trim(),
+      constituency: constituency ? constituency.trim() : '',
       isVerified: false, // Requires admin verification
       isEligible: false,
       registeredAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -188,7 +196,7 @@ router.put('/profile', verifyToken, async (req, res) => {
       console.warn('Admin check failed, continuing with profile update:', adminCheckError.message);
     }
     
-    const { address, phoneNumber } = req.body;
+    const { address, phoneNumber, state, district, ward, constituency } = req.body;
 
     const updateData = {
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -196,6 +204,10 @@ router.put('/profile', verifyToken, async (req, res) => {
 
     if (address) updateData.address = address;
     if (phoneNumber) updateData.phoneNumber = phoneNumber;
+    if (state) updateData.state = state.trim();
+    if (district) updateData.district = district.trim();
+    if (ward) updateData.ward = ward.trim();
+    if (constituency !== undefined) updateData.constituency = constituency ? constituency.trim() : '';
 
     await db.collection(collections.VOTER_REGISTRY).doc(uid).update(updateData);
 

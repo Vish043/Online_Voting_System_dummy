@@ -70,6 +70,59 @@ router.post('/', verifyToken, verifyVoterEligibility, async (req, res) => {
       return res.status(400).json({ error: 'Election has ended' });
     }
 
+    // Check voter eligibility based on election type and regions
+    const voterDoc = await db.collection(collections.VOTER_REGISTRY).doc(uid).get();
+    if (!voterDoc.exists) {
+      return res.status(403).json({ error: 'Voter not registered' });
+    }
+
+    const voter = voterDoc.data();
+    if (!voter.isVerified || !voter.isEligible) {
+      return res.status(403).json({ error: 'Voter not verified or not eligible' });
+    }
+
+    const electionType = electionData.type || 'general';
+    const allowedRegions = electionData.allowedRegions || [];
+
+    // Check eligibility based on election type
+    let isEligible = false;
+    if (electionType === 'national') {
+      // All verified voters are eligible for national elections
+      isEligible = true;
+    } else if (electionType === 'state') {
+      // Voter must be in one of the allowed states
+      if (!voter.state || allowedRegions.length === 0) {
+        isEligible = false;
+      } else {
+        // Check if voter's state matches
+        if (!allowedRegions.includes(voter.state)) {
+          isEligible = false;
+        } else {
+          // If election has a constituency, check if voter's constituency matches
+          if (electionData.constituency && voter.constituency) {
+            isEligible = electionData.constituency === voter.constituency;
+          } else {
+            // If no constituency specified in election, all voters from the state are eligible
+            isEligible = true;
+          }
+        }
+      }
+    } else if (electionType === 'local') {
+      // Voter must match district or ward in allowed regions
+      if (voter.district && voter.ward && allowedRegions.length > 0) {
+        isEligible = allowedRegions.includes(voter.district) || 
+                     allowedRegions.includes(voter.ward) ||
+                     allowedRegions.includes(`${voter.district}-${voter.ward}`);
+      }
+    }
+
+    if (!isEligible) {
+      return res.status(403).json({ 
+        error: 'You are not eligible to vote in this election based on your region',
+        details: `Election type: ${electionType}, Your region: ${voter.state || 'N/A'}/${voter.district || 'N/A'}/${voter.ward || 'N/A'}/${voter.constituency || 'N/A'}`
+      });
+    }
+
     // Verify candidate exists and belongs to this election
     const candidateDoc = await db.collection(collections.CANDIDATES).doc(candidateId).get();
     

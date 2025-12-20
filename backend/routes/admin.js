@@ -145,21 +145,40 @@ router.post('/elections', async (req, res) => {
       type,
       startDate,
       endDate,
-      allowedRegions
+      allowedRegions,
+      constituency,
+      regionHierarchy
     } = req.body;
 
-    if (!title || !startDate || !endDate) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    if (!title || !startDate || !endDate || !type) {
+      return res.status(400).json({ error: 'Missing required fields: title, startDate, endDate, and type are required' });
+    }
+
+    // Validate election type
+    const validTypes = ['national', 'state', 'local'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({ error: `Invalid election type. Must be one of: ${validTypes.join(', ')}` });
+    }
+
+    // Validate allowedRegions based on type
+    if (type === 'state' && (!allowedRegions || allowedRegions.length === 0)) {
+      return res.status(400).json({ error: 'State elections require at least one allowed region (state)' });
+    }
+    if (type === 'local' && (!allowedRegions || allowedRegions.length === 0)) {
+      return res.status(400).json({ error: 'Local elections require at least one allowed region (district/ward)' });
     }
 
     const electionData = {
       title,
       description: description || '',
-      type: type || 'general',
+      type: type, // 'national', 'state', or 'local'
       startDate: admin.firestore.Timestamp.fromDate(new Date(startDate)),
       endDate: admin.firestore.Timestamp.fromDate(new Date(endDate)),
       status: 'scheduled',
-      allowedRegions: allowedRegions || [],
+      allowedRegions: allowedRegions || (type === 'national' ? [] : []),
+      constituency: constituency || '',
+      regionHierarchy: regionHierarchy || {}, // { state, district, ward }
+      resultsApproved: false,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       createdBy: req.user.uid,
       totalVotes: 0
@@ -230,11 +249,12 @@ router.post('/elections/:electionId/candidates', async (req, res) => {
       party,
       biography,
       photoURL,
-      position
+      position,
+      positionTitle
     } = req.body;
 
     if (!name || !party) {
-      return res.status(400).json({ error: 'Missing required fields' });
+      return res.status(400).json({ error: 'Missing required fields: name and party are required' });
     }
 
     // Verify election exists
@@ -244,6 +264,23 @@ router.post('/elections/:electionId/candidates', async (req, res) => {
       return res.status(404).json({ error: 'Election not found' });
     }
 
+    const electionData = electionDoc.data();
+    const electionType = electionData.type || 'general';
+    
+    // Determine position title based on election type if not provided
+    let finalPositionTitle = positionTitle;
+    if (!finalPositionTitle) {
+      if (electionType === 'national') {
+        finalPositionTitle = 'MP';
+      } else if (electionType === 'state') {
+        finalPositionTitle = 'MLA';
+      } else if (electionType === 'local') {
+        finalPositionTitle = 'Councillor'; // Default, can be 'Sarpanch' for panchayat
+      } else {
+        finalPositionTitle = 'Representative';
+      }
+    }
+
     const candidateData = {
       electionId,
       name,
@@ -251,6 +288,7 @@ router.post('/elections/:electionId/candidates', async (req, res) => {
       biography: biography || '',
       photoURL: photoURL || '',
       position: position || 0,
+      positionTitle: finalPositionTitle, // 'MP', 'MLA', 'Councillor', or 'Sarpanch'
       voteCount: 0,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       createdBy: req.user.uid

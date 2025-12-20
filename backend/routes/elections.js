@@ -43,10 +43,80 @@ function serializeElection(electionData) {
   return serialized;
 }
 
-// Get All Active Elections
+// Helper function to check if voter is eligible for an election
+async function checkVoterEligibility(uid, election) {
+  try {
+    // Get voter data
+    const voterDoc = await db.collection(collections.VOTER_REGISTRY).doc(uid).get();
+    
+    if (!voterDoc.exists) {
+      return false;
+    }
+    
+    const voter = voterDoc.data();
+    
+    // Voter must be verified and eligible
+    if (!voter.isVerified || !voter.isEligible) {
+      return false;
+    }
+    
+    // Check eligibility based on election type
+    const electionType = election.type || 'general';
+    const allowedRegions = election.allowedRegions || [];
+    
+    if (electionType === 'national') {
+      // All verified voters are eligible for national elections
+      return true;
+    } else if (electionType === 'state') {
+      // Voter must be in one of the allowed states
+      if (!voter.state || allowedRegions.length === 0) {
+        return false;
+      }
+      // Check if voter's state matches
+      if (!allowedRegions.includes(voter.state)) {
+        return false;
+      }
+      // If election has a constituency, check if voter's constituency matches
+      if (election.constituency && voter.constituency) {
+        return election.constituency === voter.constituency;
+      }
+      // If no constituency specified in election, all voters from the state are eligible
+      return true;
+    } else if (electionType === 'local') {
+      // Voter must match district or ward in allowed regions
+      if (!voter.district || !voter.ward || allowedRegions.length === 0) {
+        return false;
+      }
+      // Check if voter's district or ward is in allowed regions
+      // allowedRegions can contain district names or ward names
+      return allowedRegions.includes(voter.district) || 
+             allowedRegions.includes(voter.ward) ||
+             allowedRegions.includes(`${voter.district}-${voter.ward}`);
+    }
+    
+    // Default: not eligible
+    return false;
+  } catch (error) {
+    console.error('Error checking voter eligibility:', error);
+    return false;
+  }
+}
+
+// Get All Active Elections (filtered by eligibility)
 router.get('/', verifyToken, async (req, res) => {
   try {
+    const { uid } = req.user;
     const now = admin.firestore.Timestamp.now();
+    
+    // Check if user is admin - admins see all elections
+    let isAdmin = false;
+    try {
+      const userRecord = await admin.auth().getUser(uid);
+      const customClaims = userRecord.customClaims;
+      isAdmin = customClaims && customClaims.role === 'admin';
+    } catch (error) {
+      // If check fails, assume not admin
+    }
     
     let electionsSnapshot;
     let needsFiltering = false;
@@ -78,11 +148,14 @@ router.get('/', verifyToken, async (req, res) => {
     }
 
     const elections = [];
-    electionsSnapshot.forEach(doc => {
+    
+    // Process elections and filter by eligibility
+    for (const doc of electionsSnapshot.docs) {
       const electionData = doc.data();
       const electionId = doc.id;
       
       // Filter by dates in memory if needed
+      let includeElection = false;
       if (needsFiltering) {
         const startDate = electionData.startDate?.toDate ? 
           electionData.startDate.toDate() : 
@@ -97,16 +170,26 @@ router.get('/', verifyToken, async (req, res) => {
         const currentDate = new Date();
         
         // Only include if status is active and dates are valid
-        if (electionData.status === 'active' && 
+        includeElection = electionData.status === 'active' && 
             startDate && startDate <= currentDate && 
-            endDate && endDate >= currentDate) {
-          elections.push({ id: electionId, ...serializeElection(electionData) });
-        }
+            endDate && endDate >= currentDate;
       } else {
         // Already filtered by query
-        elections.push({ id: electionId, ...serializeElection(electionData) });
+        includeElection = true;
       }
-    });
+      
+      if (includeElection) {
+        // If admin, include all elections. Otherwise, check eligibility
+        if (isAdmin) {
+          elections.push({ id: electionId, ...serializeElection(electionData) });
+        } else {
+          const eligible = await checkVoterEligibility(uid, { ...electionData, id: electionId });
+          if (eligible) {
+            elections.push({ id: electionId, ...serializeElection(electionData) });
+          }
+        }
+      }
+    }
 
     res.json({ elections });
   } catch (error) {
@@ -189,10 +272,21 @@ router.get('/completed', verifyToken, async (req, res) => {
   }
 });
 
-// Get Upcoming Elections
+// Get Upcoming Elections (filtered by eligibility)
 router.get('/upcoming', verifyToken, async (req, res) => {
   try {
+    const { uid } = req.user;
     const now = admin.firestore.Timestamp.now();
+    
+    // Check if user is admin - admins see all elections
+    let isAdmin = false;
+    try {
+      const userRecord = await admin.auth().getUser(uid);
+      const customClaims = userRecord.customClaims;
+      isAdmin = customClaims && customClaims.role === 'admin';
+    } catch (error) {
+      // If check fails, assume not admin
+    }
     
     let electionsSnapshot;
     let needsSorting = false;
@@ -224,11 +318,14 @@ router.get('/upcoming', verifyToken, async (req, res) => {
     }
 
     const elections = [];
-    electionsSnapshot.forEach(doc => {
+    
+    // Process elections and filter by eligibility
+    for (const doc of electionsSnapshot.docs) {
       const electionData = doc.data();
       const electionId = doc.id;
       
       // Filter by startDate > now if we fetched all elections
+      let includeElection = false;
       if (needsSorting) {
         const startDate = electionData.startDate?.toDate ? 
           electionData.startDate.toDate() : 
@@ -237,14 +334,24 @@ router.get('/upcoming', verifyToken, async (req, res) => {
             null);
         
         // Only include if status is scheduled and startDate is in future
-        if (electionData.status === 'scheduled' && startDate && startDate > new Date()) {
-          elections.push({ id: electionId, ...serializeElection(electionData) });
-        }
+        includeElection = electionData.status === 'scheduled' && startDate && startDate > new Date();
       } else {
         // Already filtered by query
-        elections.push({ id: electionId, ...serializeElection(electionData) });
+        includeElection = true;
       }
-    });
+      
+      if (includeElection) {
+        // If admin, include all elections. Otherwise, check eligibility
+        if (isAdmin) {
+          elections.push({ id: electionId, ...serializeElection(electionData) });
+        } else {
+          const eligible = await checkVoterEligibility(uid, { ...electionData, id: electionId });
+          if (eligible) {
+            elections.push({ id: electionId, ...serializeElection(electionData) });
+          }
+        }
+      }
+    }
 
     // Sort by startDate in memory
     if (elections.length > 0) {
