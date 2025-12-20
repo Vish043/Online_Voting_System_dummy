@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { authAPI } from '../services/api'
 import { User, Mail, Phone, MapPin, Calendar, CheckCircle, AlertCircle } from 'lucide-react'
+import { INDIAN_STATES_AND_UTS } from '../constants/indianStates'
+import { getDistrictsByState, getConstituenciesByDistrict, hasVidhanSabhaData } from '../constants/constituencies'
 
 // Helper function to convert Firestore Timestamp to Date
 function convertTimestampToDate(timestamp) {
@@ -32,7 +34,16 @@ export default function Profile() {
   const navigate = useNavigate()
   const [profile, setProfile] = useState(null)
   const [isEditing, setIsEditing] = useState(false)
-  const [formData, setFormData] = useState({ address: '', phoneNumber: '' })
+  const [formData, setFormData] = useState({ 
+    address: '', 
+    phoneNumber: '', 
+    state: '', 
+    district: '', 
+    ward: '', 
+    constituency: '' 
+  })
+  const [availableDistricts, setAvailableDistricts] = useState([])
+  const [availableConstituencies, setAvailableConstituencies] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
@@ -45,6 +56,25 @@ export default function Profile() {
     }
     fetchProfile()
   }, [isAdmin, navigate])
+
+  // Update districts and constituencies when state or district changes
+  useEffect(() => {
+    if (formData.state && hasVidhanSabhaData(formData.state)) {
+      const districts = getDistrictsByState(formData.state)
+      setAvailableDistricts(districts)
+    } else {
+      setAvailableDistricts([])
+    }
+  }, [formData.state])
+
+  useEffect(() => {
+    if (formData.state && formData.district && hasVidhanSabhaData(formData.state)) {
+      const constituencies = getConstituenciesByDistrict(formData.state, formData.district)
+      setAvailableConstituencies(constituencies)
+    } else {
+      setAvailableConstituencies([])
+    }
+  }, [formData.state, formData.district])
 
   // Don't render anything if admin (will redirect)
   if (isAdmin) {
@@ -59,7 +89,11 @@ export default function Profile() {
       setProfile(voterData)
       setFormData({
         address: voterData.address || '',
-        phoneNumber: voterData.phoneNumber || ''
+        phoneNumber: voterData.phoneNumber || '',
+        state: voterData.state || '',
+        district: voterData.district || '',
+        ward: voterData.ward || '',
+        constituency: voterData.constituency || ''
       })
     } catch (error) {
       console.error('Fetch profile error:', error)
@@ -182,6 +216,105 @@ export default function Profile() {
                 label="Address"
                 value={profile?.address || 'Not provided'}
               />
+              <ProfileField
+                icon={<MapPin size={20} />}
+                label="State"
+                value={profile?.state || 'Not provided'}
+              />
+              <ProfileField
+                icon={<MapPin size={20} />}
+                label="District"
+                value={profile?.district || 'Not provided'}
+              />
+              {profile?.constituency && (
+                <ProfileField
+                  icon={<MapPin size={20} />}
+                  label="Constituency"
+                  value={profile?.constituency || 'Not provided'}
+                />
+              )}
+              <ProfileField
+                icon={<MapPin size={20} />}
+                label="Ward/Locality/Panchayat"
+                value={profile?.ward || 'Not provided'}
+              />
+            </>
+          )}
+          {isEditing && (
+            <>
+              <div className="input-group" style={styles.editField}>
+                <label>
+                  <MapPin size={16} style={styles.inlineIcon} /> State
+                </label>
+                <select
+                  value={formData.state}
+                  onChange={(e) => setFormData({ ...formData, state: e.target.value, district: '', constituency: '' })}
+                  style={styles.stateSelect}
+                >
+                  <option value="">Select state...</option>
+                  {INDIAN_STATES_AND_UTS.map((state) => (
+                    <option key={state.name} value={state.name}>
+                      {state.name} {state.type === 'ut' ? '(UT)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="input-group" style={styles.editField}>
+                <label>
+                  <MapPin size={16} style={styles.inlineIcon} /> District
+                </label>
+                {formData.state && hasVidhanSabhaData(formData.state) && availableDistricts.length > 0 ? (
+                  <select
+                    value={formData.district}
+                    onChange={(e) => setFormData({ ...formData, district: e.target.value, constituency: '' })}
+                    style={styles.stateSelect}
+                  >
+                    <option value="">Select district...</option>
+                    {availableDistricts.map((district) => (
+                      <option key={district} value={district}>
+                        {district}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={formData.district}
+                    onChange={(e) => setFormData({ ...formData, district: e.target.value })}
+                    placeholder="Enter district"
+                  />
+                )}
+              </div>
+              {formData.state && formData.district && hasVidhanSabhaData(formData.state) && availableConstituencies.length > 0 && (
+                <div className="input-group" style={styles.editField}>
+                  <label>
+                    <MapPin size={16} style={styles.inlineIcon} /> Constituency
+                  </label>
+                  <select
+                    value={formData.constituency}
+                    onChange={(e) => setFormData({ ...formData, constituency: e.target.value })}
+                    style={styles.stateSelect}
+                  >
+                    <option value="">Select constituency...</option>
+                    {availableConstituencies.map((constituency) => (
+                      <option key={constituency} value={constituency}>
+                        {constituency}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="input-group" style={styles.editField}>
+                <label>
+                  <MapPin size={16} style={styles.inlineIcon} /> Ward/Locality/Panchayat
+                </label>
+                <input
+                  type="text"
+                  value={formData.ward}
+                  onChange={(e) => setFormData({ ...formData, ward: e.target.value })}
+                  placeholder="Enter ward/locality/panchayat"
+                />
+              </div>
             </>
           )}
         </div>
@@ -202,7 +335,11 @@ export default function Profile() {
                   setIsEditing(false)
                   setFormData({
                     address: profile?.address || '',
-                    phoneNumber: profile?.phoneNumber || ''
+                    phoneNumber: profile?.phoneNumber || '',
+                    state: profile?.state || '',
+                    district: profile?.district || '',
+                    ward: profile?.ward || '',
+                    constituency: profile?.constituency || ''
                   })
                 }}
                 className="btn btn-outline"
@@ -379,6 +516,16 @@ const styles = {
     fontSize: '1.125rem',
     fontWeight: 600,
     color: 'var(--primary-color)'
+  },
+  stateSelect: {
+    width: '100%',
+    padding: '0.75rem',
+    fontSize: '1rem',
+    border: '1px solid var(--border-color)',
+    borderRadius: '0.375rem',
+    backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-primary)',
+    cursor: 'pointer'
   }
 }
 

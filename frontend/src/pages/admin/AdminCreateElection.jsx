@@ -2,16 +2,28 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { adminAPI } from '../../services/api'
 import { Plus, Trash2, CheckCircle, AlertCircle, ArrowLeft } from 'lucide-react'
+import { INDIAN_STATES_AND_UTS } from '../../constants/indianStates'
+import { 
+  getConstituenciesByState, 
+  getDistrictsByState, 
+  getConstituenciesByDistrict,
+  hasVidhanSabhaData 
+} from '../../constants/constituencies'
 
 export default function AdminCreateElection() {
   const navigate = useNavigate()
   const [electionData, setElectionData] = useState({
     title: '',
     description: '',
-    type: 'general',
+    type: 'national',
     startDate: '',
-    endDate: ''
+    endDate: '',
+    constituency: '',
+    allowedRegions: [],
+    regionHierarchy: { state: '', district: '', ward: '' }
   })
+  const [regionInput, setRegionInput] = useState('')
+  const [selectedDistrict, setSelectedDistrict] = useState('')
   const [candidates, setCandidates] = useState([
     { name: '', party: '', biography: '', photoURL: '' }
   ])
@@ -19,10 +31,51 @@ export default function AdminCreateElection() {
   const [message, setMessage] = useState({ type: '', text: '' })
 
   function handleElectionChange(e) {
+    const { name, value } = e.target
     setElectionData({
       ...electionData,
-      [e.target.name]: e.target.value
+      [name]: value,
+      // Reset regions when type changes
+      ...(name === 'type' && { allowedRegions: [], regionHierarchy: { state: '', district: '', ward: '' }, constituency: '' })
     })
+    // Clear district selection when type changes or constituency is cleared
+    if (name === 'type' || (name === 'constituency' && value === '')) {
+      setSelectedDistrict('')
+    }
+  }
+
+  function handleRegionHierarchyChange(field, value) {
+    setElectionData({
+      ...electionData,
+      regionHierarchy: {
+        ...electionData.regionHierarchy,
+        [field]: value
+      }
+    })
+  }
+
+  function addRegion() {
+    if (regionInput.trim()) {
+      setElectionData({
+        ...electionData,
+        allowedRegions: [...electionData.allowedRegions, regionInput.trim()]
+      })
+      setRegionInput('')
+    }
+  }
+
+  function removeRegion(index) {
+    const newAllowedRegions = electionData.allowedRegions.filter((_, i) => i !== index)
+    setElectionData({
+      ...electionData,
+      allowedRegions: newAllowedRegions,
+      // Clear constituency if no regions left or if it was a state election
+      ...(electionData.type === 'state' && newAllowedRegions.length === 0 ? { constituency: '' } : {})
+    })
+    // Clear district selection if state is removed
+    if (electionData.type === 'state') {
+      setSelectedDistrict('')
+    }
   }
 
   function handleCandidateChange(index, field, value) {
@@ -46,13 +99,24 @@ export default function AdminCreateElection() {
     e.preventDefault()
 
     // Validation
-    if (!electionData.title || !electionData.startDate || !electionData.endDate) {
+    if (!electionData.title || !electionData.startDate || !electionData.endDate || !electionData.type) {
       setMessage({ type: 'error', text: 'Please fill in all required election fields' })
       return
     }
 
     if (new Date(electionData.startDate) >= new Date(electionData.endDate)) {
       setMessage({ type: 'error', text: 'End date must be after start date' })
+      return
+    }
+
+    // Validate regions based on election type
+    if (electionData.type === 'state' && electionData.allowedRegions.length === 0) {
+      setMessage({ type: 'error', text: 'State elections require at least one allowed region (state name)' })
+      return
+    }
+
+    if (electionData.type === 'local' && electionData.allowedRegions.length === 0) {
+      setMessage({ type: 'error', text: 'Local elections require at least one allowed region (district/ward name)' })
       return
     }
 
@@ -66,8 +130,20 @@ export default function AdminCreateElection() {
       setLoading(true)
       setMessage({ type: '', text: '' })
 
+      // Prepare election data for API
+      const electionPayload = {
+        title: electionData.title,
+        description: electionData.description,
+        type: electionData.type,
+        startDate: electionData.startDate,
+        endDate: electionData.endDate,
+        constituency: electionData.constituency || '',
+        allowedRegions: electionData.allowedRegions,
+        regionHierarchy: electionData.regionHierarchy
+      }
+
       // Create election
-      const electionRes = await adminAPI.createElection(electionData)
+      const electionRes = await adminAPI.createElection(electionPayload)
       const electionId = electionRes.data.electionId
 
       // Add candidates
@@ -134,23 +210,392 @@ export default function AdminCreateElection() {
             />
           </div>
 
-          <div style={styles.row}>
-            <div className="input-group">
-              <label htmlFor="type">Election Type *</label>
-              <select
-                id="type"
-                name="type"
-                value={electionData.type}
-                onChange={handleElectionChange}
-                required
-              >
-                <option value="general">General</option>
-                <option value="presidential">Presidential</option>
-                <option value="parliamentary">Parliamentary</option>
-                <option value="local">Local</option>
-                <option value="referendum">Referendum</option>
-              </select>
+          <div className="input-group">
+            <label htmlFor="type">Election Type *</label>
+            <select
+              id="type"
+              name="type"
+              value={electionData.type}
+              onChange={handleElectionChange}
+              required
+              style={styles.typeSelect}
+            >
+              <option value="national">National (Lok Sabha) - Elects MP</option>
+              <option value="state">State (Vidhan Sabha) - Elects MLA</option>
+              <option value="local">Local (Municipality/Panchayat) - Elects Councillor/Sarpanch</option>
+            </select>
+            <div style={styles.typeDescription}>
+              {electionData.type === 'national' && (
+                <p style={styles.descriptionText}>
+                  <strong>Lok Sabha Election:</strong> National-level election where all verified voters are eligible. 
+                  Winners become Members of Parliament (MP).
+                </p>
+              )}
+              {electionData.type === 'state' && (
+                <p style={styles.descriptionText}>
+                  <strong>Vidhan Sabha Election:</strong> State-level election. Only voters from selected states are eligible. 
+                  Winners become Members of Legislative Assembly (MLA).
+                </p>
+              )}
+              {electionData.type === 'local' && (
+                <p style={styles.descriptionText}>
+                  <strong>Municipality/Panchayat Election:</strong> Local-level election. Only voters from selected districts/wards are eligible. 
+                  Winners become Councillors (municipal) or Sarpanch (panchayat).
+                </p>
+              )}
             </div>
+          </div>
+
+          {/* Region Configuration */}
+          {electionData.type === 'national' ? (
+            <div style={styles.regionSection}>
+              <h3 style={styles.subsectionTitle}>Select State to View Constituencies</h3>
+              <p style={styles.regionHelp}>
+                Select a state to see its constituencies in the dropdown below. This will help you select the correct constituency name.
+              </p>
+              <div>
+                <label style={styles.selectLabel}>Select State/UT:</label>
+                <select
+                  value={regionInput}
+                  onChange={(e) => {
+                    const selectedState = e.target.value
+                    setRegionInput(selectedState)
+                    // Automatically update allowedRegions when state is selected
+                    if (selectedState) {
+                      setElectionData({ 
+                        ...electionData, 
+                        allowedRegions: [selectedState],
+                        constituency: '' // Clear constituency when state changes
+                      })
+                    } else {
+                      setElectionData({ 
+                        ...electionData, 
+                        allowedRegions: [],
+                        constituency: ''
+                      })
+                    }
+                  }}
+                  style={styles.stateSelect}
+                >
+                  <option value="">Choose a state or union territory...</option>
+                  {INDIAN_STATES_AND_UTS.map((state) => (
+                    <option key={state.name} value={state.name}>
+                      {state.name} ({state.seats} seats)
+                    </option>
+                  ))}
+                </select>
+                {electionData.allowedRegions.length > 0 && (
+                  <div style={styles.selectedStateInfo}>
+                    <span className="badge badge-success">
+                      Selected: {electionData.allowedRegions[0]}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setElectionData({ ...electionData, allowedRegions: [], constituency: '' })
+                        setRegionInput('')
+                      }}
+                      className="btn btn-outline"
+                      style={{ ...styles.addRegionBtn, marginLeft: '0.5rem' }}
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div style={styles.regionSection}>
+              <h3 style={styles.subsectionTitle}>
+                {electionData.type === 'state' ? 'Allowed States' : 'Allowed Districts/Wards'}
+              </h3>
+              <p style={styles.regionHelp}>
+                {electionData.type === 'state' 
+                  ? 'Add state names. Only voters from these states will be eligible to vote.'
+                  : 'Add district or ward names. Only voters from these regions will be eligible to vote.'}
+              </p>
+
+              {/* Region Hierarchy (for reference) */}
+              <div style={styles.row}>
+                {electionData.type === 'local' && (
+                  <>
+                    <div className="input-group">
+                      <label>State (Reference)</label>
+                      <input
+                        type="text"
+                        value={electionData.regionHierarchy.state}
+                        onChange={(e) => handleRegionHierarchyChange('state', e.target.value)}
+                        placeholder="e.g., Maharashtra"
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>District (Reference)</label>
+                      <input
+                        type="text"
+                        value={electionData.regionHierarchy.district}
+                        onChange={(e) => handleRegionHierarchyChange('district', e.target.value)}
+                        placeholder="e.g., Mumbai"
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Ward (Reference)</label>
+                      <input
+                        type="text"
+                        value={electionData.regionHierarchy.ward}
+                        onChange={(e) => handleRegionHierarchyChange('ward', e.target.value)}
+                        placeholder="e.g., Ward 1"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Add Regions */}
+              <div style={styles.addRegionSection}>
+                {electionData.type === 'state' ? (
+                  <div>
+                    <label style={styles.selectLabel}>Select State/UT:</label>
+                    <select
+                      value={regionInput}
+                      onChange={(e) => {
+                        const selectedState = e.target.value
+                        setRegionInput(selectedState)
+                        // Clear district and constituency when state changes
+                        setSelectedDistrict('')
+                        setElectionData({ 
+                          ...electionData, 
+                          constituency: '',
+                          // Don't update allowedRegions here - let addRegion handle it
+                        })
+                      }}
+                      style={styles.stateSelect}
+                    >
+                      <option value="">Choose a state or union territory...</option>
+                      {INDIAN_STATES_AND_UTS.map((state) => {
+                        const vidhanSabhaSeats = state.vidhanSabhaSeats
+                        const seatInfo = vidhanSabhaSeats 
+                          ? `${vidhanSabhaSeats} Assembly seats`
+                          : 'No Assembly'
+                        return (
+                          <option key={state.name} value={state.name}>
+                            {state.name} ({seatInfo})
+                          </option>
+                        )
+                      })}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        addRegion()
+                        // Clear district selection when state is added
+                        setSelectedDistrict('')
+                      }}
+                      className="btn btn-secondary"
+                      style={styles.addRegionBtn}
+                      disabled={!regionInput}
+                    >
+                      <Plus size={16} />
+                      Add State
+                    </button>
+                  </div>
+                ) : (
+                  <div style={styles.addRegionInput}>
+                    <input
+                      type="text"
+                      value={regionInput}
+                      onChange={(e) => setRegionInput(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addRegion())}
+                      placeholder="Enter district or ward name (e.g., Mumbai, Ward 1)"
+                      style={styles.regionInput}
+                    />
+                    <button
+                      type="button"
+                      onClick={addRegion}
+                      className="btn btn-secondary"
+                      style={styles.addRegionBtn}
+                    >
+                      <Plus size={16} />
+                      Add
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Display Added Regions */}
+              {electionData.allowedRegions.length > 0 && (
+                <div style={styles.regionsList}>
+                  <p style={styles.regionsLabel}>Allowed Regions:</p>
+                  <div style={styles.regionsTags}>
+                    {electionData.allowedRegions.map((region, index) => (
+                      <span key={index} className="badge badge-info" style={styles.regionTag}>
+                        {region}
+                        <button
+                          type="button"
+                          onClick={() => removeRegion(index)}
+                          style={styles.removeRegionBtn}
+                          aria-label="Remove region"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Constituency Name Field - Appears after state selection for national elections, or after district selection for state elections */}
+          <div className="input-group">
+            <label htmlFor="constituency">Constituency Name *</label>
+            {electionData.type === 'national' && electionData.allowedRegions.length === 1 ? (
+              // Show dropdown if single state selected for national election
+              (() => {
+                const selectedState = electionData.allowedRegions[0]
+                const constituencies = getConstituenciesByState(selectedState)
+                return constituencies.length > 0 ? (
+                  <>
+                    <select
+                      id="constituency"
+                      name="constituency"
+                      value={electionData.constituency}
+                      onChange={handleElectionChange}
+                      style={styles.constituencySelect}
+                      required
+                    >
+                      <option value="">-- Select a constituency from {selectedState} --</option>
+                      {constituencies.map((constituency) => (
+                        <option key={constituency} value={constituency}>
+                          {constituency}
+                        </option>
+                      ))}
+                    </select>
+                    <small style={styles.helpText}>
+                      Showing {constituencies.length} constituencies for {selectedState}. Select one from the dropdown above.
+                    </small>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      id="constituency"
+                      name="constituency"
+                      value={electionData.constituency}
+                      onChange={handleElectionChange}
+                      placeholder={`Enter constituency name for ${selectedState}`}
+                      required
+                    />
+                    <small style={styles.helpText}>
+                      No predefined constituencies found for {selectedState}. Please enter the constituency name manually.
+                    </small>
+                  </>
+                )
+              })()
+            ) : electionData.type === 'state' && electionData.allowedRegions.length === 1 && hasVidhanSabhaData(electionData.allowedRegions[0]) ? (
+              // Show district and constituency dropdowns for state elections with Vidhan Sabha data
+              (() => {
+                const selectedState = electionData.allowedRegions[0]
+                const districts = getDistrictsByState(selectedState)
+                const constituencies = selectedDistrict ? getConstituenciesByDistrict(selectedState, selectedDistrict) : []
+                
+                return (
+                  <>
+                    {/* District Selection */}
+                    <div style={{ marginBottom: '1rem' }}>
+                      <label style={styles.selectLabel}>Select District:</label>
+                      <select
+                        value={selectedDistrict}
+                        onChange={(e) => {
+                          setSelectedDistrict(e.target.value)
+                          setElectionData({ ...electionData, constituency: '' }) // Clear constituency when district changes
+                        }}
+                        style={styles.stateSelect}
+                        required
+                      >
+                        <option value="">-- Select a district --</option>
+                        {districts.map((district) => (
+                          <option key={district} value={district}>
+                            {district}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    {/* Constituency Selection */}
+                    {selectedDistrict && constituencies.length > 0 ? (
+                      <>
+                        <select
+                          id="constituency"
+                          name="constituency"
+                          value={electionData.constituency}
+                          onChange={handleElectionChange}
+                          style={styles.constituencySelect}
+                          required
+                        >
+                          <option value="">-- Select a constituency from {selectedDistrict} --</option>
+                          {constituencies.map((constituency) => (
+                            <option key={constituency} value={constituency}>
+                              {constituency}
+                            </option>
+                          ))}
+                        </select>
+                        <small style={styles.helpText}>
+                          Showing {constituencies.length} constituencies for {selectedDistrict} district. Select one from the dropdown above.
+                        </small>
+                      </>
+                    ) : selectedDistrict ? (
+                      <>
+                        <input
+                          type="text"
+                          id="constituency"
+                          name="constituency"
+                          value={electionData.constituency}
+                          onChange={handleElectionChange}
+                          placeholder={`Enter constituency name for ${selectedDistrict}`}
+                          required
+                        />
+                        <small style={styles.helpText}>
+                          No predefined constituencies found for {selectedDistrict}. Please enter the constituency name manually.
+                        </small>
+                      </>
+                    ) : (
+                      <small style={styles.helpText}>
+                        <strong>Step 1:</strong> Select a district above to see its constituencies.
+                      </small>
+                    )}
+                  </>
+                )
+              })()
+            ) : (
+              <>
+                <input
+                  type="text"
+                  id="constituency"
+                  name="constituency"
+                  value={electionData.constituency}
+                  onChange={handleElectionChange}
+                  placeholder={
+                    electionData.type === 'national' ? 'Select a state above first to see constituencies, or enter manually' :
+                    electionData.type === 'state' ? 'Select a state above first, or enter constituency name manually (e.g., Mumbai South)' :
+                    'e.g., Ward 1, Panchayat Name'
+                  }
+                  required={electionData.type === 'national' ? false : true}
+                />
+                {electionData.type === 'national' && (
+                  <small style={styles.helpText}>
+                    <strong>Step 2:</strong> After selecting a state above, you'll see constituencies in a dropdown, or enter constituency name manually.
+                  </small>
+                )}
+                {electionData.type === 'state' && electionData.allowedRegions.length === 0 && (
+                  <small style={styles.helpText}>
+                    <strong>Step 1:</strong> Select a state above first. If the state has Vidhan Sabha data, you'll see district and constituency dropdowns.
+                  </small>
+                )}
+              </>
+            )}
+          </div>
+
+          <div style={styles.row}>
 
             <div className="input-group">
               <label htmlFor="startDate">Start Date *</label>
@@ -338,6 +783,137 @@ const styles = {
   submitBtn: {
     fontSize: '1.125rem',
     padding: '0.875rem 3rem'
+  },
+  typeSelect: {
+    fontSize: '1rem',
+    padding: '0.75rem'
+  },
+  typeDescription: {
+    marginTop: '0.75rem',
+    padding: '1rem',
+    backgroundColor: 'var(--bg-secondary)',
+    borderRadius: '0.5rem',
+    borderLeft: '4px solid var(--primary-color)'
+  },
+  descriptionText: {
+    margin: 0,
+    color: 'var(--text-primary)',
+    fontSize: '0.9375rem',
+    lineHeight: '1.6'
+  },
+  regionSection: {
+    marginTop: '1.5rem',
+    padding: '1.5rem',
+    backgroundColor: 'var(--bg-secondary)',
+    borderRadius: '0.5rem',
+    border: '1px solid var(--border-color)'
+  },
+  subsectionTitle: {
+    fontSize: '1.125rem',
+    marginBottom: '0.5rem',
+    color: 'var(--text-primary)'
+  },
+  regionHelp: {
+    fontSize: '0.875rem',
+    color: 'var(--text-secondary)',
+    marginBottom: '1rem'
+  },
+  addRegionSection: {
+    marginTop: '1rem'
+  },
+  addRegionInput: {
+    display: 'flex',
+    gap: '0.5rem'
+  },
+  regionInput: {
+    flex: 1,
+    padding: '0.75rem',
+    fontSize: '1rem',
+    border: '1px solid var(--border-color)',
+    borderRadius: '0.375rem',
+    backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-primary)'
+  },
+  addRegionBtn: {
+    whiteSpace: 'nowrap'
+  },
+  regionsList: {
+    marginTop: '1rem'
+  },
+  regionsLabel: {
+    fontSize: '0.875rem',
+    color: 'var(--text-secondary)',
+    marginBottom: '0.5rem'
+  },
+  regionsTags: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '0.5rem'
+  },
+  regionTag: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    padding: '0.5rem 0.75rem',
+    fontSize: '0.875rem'
+  },
+  removeRegionBtn: {
+    background: 'none',
+    border: 'none',
+    color: 'inherit',
+    cursor: 'pointer',
+    fontSize: '1.25rem',
+    lineHeight: 1,
+    padding: 0,
+    marginLeft: '0.25rem',
+    opacity: 0.7,
+    transition: 'opacity 0.2s',
+    width: '20px',
+    height: '20px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  selectLabel: {
+    display: 'block',
+    marginBottom: '0.5rem',
+    fontSize: '0.875rem',
+    color: 'var(--text-secondary)',
+    fontWeight: 500
+  },
+  stateSelect: {
+    width: '100%',
+    padding: '0.75rem',
+    fontSize: '1rem',
+    border: '1px solid var(--border-color)',
+    borderRadius: '0.375rem',
+    backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-primary)',
+    marginBottom: '0.75rem',
+    cursor: 'pointer'
+  },
+  constituencySelect: {
+    width: '100%',
+    padding: '0.75rem',
+    fontSize: '1rem',
+    border: '1px solid var(--border-color)',
+    borderRadius: '0.375rem',
+    backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-primary)',
+    cursor: 'pointer'
+  },
+  helpText: {
+    display: 'block',
+    marginTop: '0.5rem',
+    fontSize: '0.875rem',
+    color: 'var(--text-secondary)',
+    fontStyle: 'italic'
+  },
+  selectedStateInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    marginTop: '0.75rem',
+    gap: '0.5rem'
   }
 }
 

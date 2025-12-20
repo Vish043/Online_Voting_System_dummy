@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { electionsAPI } from '../services/api'
-import { Calendar, Clock, TrendingUp, Award } from 'lucide-react'
+import { Calendar, Clock, TrendingUp, Award, Filter } from 'lucide-react'
+import { INDIAN_STATES_AND_UTS } from '../constants/indianStates'
+import { getDistrictsByState, getConstituenciesByDistrict, hasVidhanSabhaData } from '../constants/constituencies'
 
 // Helper function to convert Firestore Timestamp to Date
 function convertTimestampToDate(timestamp) {
@@ -32,10 +34,45 @@ export default function Elections() {
   const [completedElections, setCompletedElections] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('active')
+  const [filters, setFilters] = useState({
+    state: '',
+    district: '',
+    constituency: ''
+  })
+  const [availableDistricts, setAvailableDistricts] = useState([])
+  const [availableConstituencies, setAvailableConstituencies] = useState([])
 
   useEffect(() => {
     fetchElections()
   }, [])
+
+  // Update districts when state changes
+  useEffect(() => {
+    if (filters.state && hasVidhanSabhaData(filters.state)) {
+      const districts = getDistrictsByState(filters.state)
+      setAvailableDistricts(districts)
+      if (filters.district && !districts.includes(filters.district)) {
+        setFilters(prev => ({ ...prev, district: '', constituency: '' }))
+      }
+    } else {
+      setAvailableDistricts([])
+      setFilters(prev => ({ ...prev, district: '', constituency: '' }))
+    }
+  }, [filters.state])
+
+  // Update constituencies when district changes
+  useEffect(() => {
+    if (filters.state && filters.district && hasVidhanSabhaData(filters.state)) {
+      const constituencies = getConstituenciesByDistrict(filters.state, filters.district)
+      setAvailableConstituencies(constituencies)
+      if (filters.constituency && !constituencies.includes(filters.constituency)) {
+        setFilters(prev => ({ ...prev, constituency: '' }))
+      }
+    } else {
+      setAvailableConstituencies([])
+      setFilters(prev => ({ ...prev, constituency: '' }))
+    }
+  }, [filters.state, filters.district])
 
   async function fetchElections() {
     try {
@@ -63,9 +100,26 @@ export default function Elections() {
     )
   }
 
+  // Filter completed elections based on filters
+  const filteredCompletedElections = tab === 'completed' ? completedElections.filter(election => {
+    if (filters.state && election.allowedRegions && !election.allowedRegions.includes(filters.state)) {
+      return false
+    }
+    if (filters.constituency && election.constituency !== filters.constituency) {
+      return false
+    }
+    // District filter can match regionHierarchy or allowedRegions
+    if (filters.district) {
+      const hasDistrict = election.regionHierarchy?.district === filters.district ||
+                         election.allowedRegions?.includes(filters.district)
+      if (!hasDistrict) return false
+    }
+    return true
+  }) : []
+
   const elections = tab === 'active' ? activeElections : 
                    tab === 'upcoming' ? upcomingElections : 
-                   completedElections
+                   filteredCompletedElections
 
   return (
     <div className="container" style={styles.container}>
@@ -93,16 +147,100 @@ export default function Elections() {
           onClick={() => setTab('completed')}
         >
           <Award size={18} />
-          Results ({completedElections.length})
+          Results ({filteredCompletedElections.length})
         </button>
       </div>
+
+      {/* Filters for Results tab */}
+      {tab === 'completed' && (
+        <div className="card" style={styles.filtersCard}>
+          <div style={styles.filtersHeader}>
+            <Filter size={20} />
+            <h3 style={styles.filtersTitle}>Filter Results</h3>
+          </div>
+          <div style={styles.filtersGrid}>
+            <div className="input-group">
+              <label>State</label>
+              <select
+                value={filters.state}
+                onChange={(e) => setFilters({ ...filters, state: e.target.value, district: '', constituency: '' })}
+                style={styles.filterSelect}
+              >
+                <option value="">All States</option>
+                {INDIAN_STATES_AND_UTS.map((state) => (
+                  <option key={state.name} value={state.name}>
+                    {state.name} {state.type === 'ut' ? '(UT)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="input-group">
+              <label>District</label>
+              {filters.state && hasVidhanSabhaData(filters.state) && availableDistricts.length > 0 ? (
+                <select
+                  value={filters.district}
+                  onChange={(e) => setFilters({ ...filters, district: e.target.value, constituency: '' })}
+                  style={styles.filterSelect}
+                >
+                  <option value="">All Districts</option>
+                  {availableDistricts.map((district) => (
+                    <option key={district} value={district}>
+                      {district}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={filters.district}
+                  onChange={(e) => setFilters({ ...filters, district: e.target.value, constituency: '' })}
+                  placeholder="Enter district"
+                  style={styles.filterInput}
+                />
+              )}
+            </div>
+            {filters.state && filters.district && hasVidhanSabhaData(filters.state) && availableConstituencies.length > 0 && (
+              <div className="input-group">
+                <label>Constituency</label>
+                <select
+                  value={filters.constituency}
+                  onChange={(e) => setFilters({ ...filters, constituency: e.target.value })}
+                  style={styles.filterSelect}
+                >
+                  <option value="">All Constituencies</option>
+                  {availableConstituencies.map((constituency) => (
+                    <option key={constituency} value={constituency}>
+                      {constituency}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {(filters.state || filters.district || filters.constituency) && (
+              <div className="input-group" style={styles.clearFilter}>
+                <button
+                  onClick={() => setFilters({ state: '', district: '', constituency: '' })}
+                  className="btn btn-outline"
+                  style={styles.clearBtn}
+                >
+                  Clear Filters
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Elections Grid */}
       {elections.length === 0 ? (
         <div className="card" style={styles.emptyState}>
           <Calendar size={48} style={styles.emptyIcon} />
           <h3>No {tab} Elections</h3>
-          <p>There are currently no {tab} elections.</p>
+          <p>
+            {tab === 'completed' && (filters.state || filters.district || filters.constituency)
+              ? 'No elections found matching your filters.'
+              : `There are currently no ${tab} elections.`}
+          </p>
         </div>
       ) : (
         <div className="grid grid-2">
@@ -135,6 +273,17 @@ function ElectionCard({ election, isActive, isCompleted }) {
 
       <h3 style={styles.electionTitle}>{election.title}</h3>
       <p style={styles.electionDesc}>{election.description}</p>
+      {election.constituency && (
+        <div style={styles.constituencyInfo}>
+          <strong>Constituency:</strong> {election.constituency}
+        </div>
+      )}
+      {election.regionHierarchy && (
+        <div style={styles.regionInfo}>
+          {election.regionHierarchy.state && <span>State: {election.regionHierarchy.state}</span>}
+          {election.regionHierarchy.district && <span>District: {election.regionHierarchy.district}</span>}
+        </div>
+      )}
 
       <div style={styles.dates}>
         <div style={styles.date}>
@@ -276,6 +425,66 @@ const styles = {
     alignItems: 'center',
     gap: '0.5rem',
     flex: 1
+  },
+  filtersCard: {
+    marginBottom: '2rem',
+    padding: '1.5rem'
+  },
+  filtersHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    marginBottom: '1rem'
+  },
+  filtersTitle: {
+    fontSize: '1.125rem',
+    margin: 0
+  },
+  filtersGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: '1rem',
+    alignItems: 'end'
+  },
+  filterSelect: {
+    width: '100%',
+    padding: '0.75rem',
+    fontSize: '1rem',
+    border: '1px solid var(--border-color)',
+    borderRadius: '0.375rem',
+    backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-primary)',
+    cursor: 'pointer'
+  },
+  filterInput: {
+    width: '100%',
+    padding: '0.75rem',
+    fontSize: '1rem',
+    border: '1px solid var(--border-color)',
+    borderRadius: '0.375rem',
+    backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-primary)'
+  },
+  clearFilter: {
+    display: 'flex',
+    alignItems: 'end'
+  },
+  clearBtn: {
+    width: '100%'
+  },
+  constituencyInfo: {
+    fontSize: '0.875rem',
+    color: 'var(--primary-color)',
+    marginBottom: '0.5rem',
+    fontWeight: 600
+  },
+  regionInfo: {
+    fontSize: '0.75rem',
+    color: 'var(--text-secondary)',
+    marginBottom: '1rem',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.25rem'
   }
 }
 

@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { authAPI } from '../services/api'
 import { UserPlus, AlertCircle, CheckCircle } from 'lucide-react'
+import { INDIAN_STATES_AND_UTS } from '../constants/indianStates'
+import { getDistrictsByState, getConstituenciesByDistrict, hasVidhanSabhaData } from '../constants/constituencies'
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -14,13 +16,48 @@ export default function Register() {
     dateOfBirth: '',
     nationalId: '',
     address: '',
-    phoneNumber: ''
+    phoneNumber: '',
+    state: '',
+    district: '',
+    ward: '',
+    constituency: ''
   })
+  const [availableDistricts, setAvailableDistricts] = useState([])
+  const [availableConstituencies, setAvailableConstituencies] = useState([])
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
   const { signup } = useAuth()
   const navigate = useNavigate()
+
+  // Update districts and constituencies when state or district changes
+  useEffect(() => {
+    if (formData.state && hasVidhanSabhaData(formData.state)) {
+      const districts = getDistrictsByState(formData.state)
+      setAvailableDistricts(districts)
+      // Reset district and constituency when state changes
+      if (formData.district && !districts.includes(formData.district)) {
+        setFormData(prev => ({ ...prev, district: '', constituency: '' }))
+      }
+    } else {
+      setAvailableDistricts([])
+      setFormData(prev => ({ ...prev, district: '', constituency: '' }))
+    }
+  }, [formData.state])
+
+  useEffect(() => {
+    if (formData.state && formData.district && hasVidhanSabhaData(formData.state)) {
+      const constituencies = getConstituenciesByDistrict(formData.state, formData.district)
+      setAvailableConstituencies(constituencies)
+      // Reset constituency when district changes
+      if (formData.constituency && !constituencies.includes(formData.constituency)) {
+        setFormData(prev => ({ ...prev, constituency: '' }))
+      }
+    } else {
+      setAvailableConstituencies([])
+      setFormData(prev => ({ ...prev, constituency: '' }))
+    }
+  }, [formData.state, formData.district])
 
   function handleChange(e) {
     setFormData({
@@ -56,7 +93,11 @@ export default function Register() {
         dateOfBirth: formData.dateOfBirth,
         nationalId: formData.nationalId,
         address: formData.address,
-        phoneNumber: formData.phoneNumber
+        phoneNumber: formData.phoneNumber,
+        state: formData.state,
+        district: formData.district,
+        ward: formData.ward,
+        constituency: formData.constituency
       })
 
       setSuccess('Registration successful! Your account is pending verification.')
@@ -217,6 +258,95 @@ export default function Register() {
             />
           </div>
 
+          <div style={styles.sectionDivider}>
+            <h3 style={styles.sectionTitle}>Region Information *</h3>
+            <p style={styles.sectionSubtitle}>Required for election eligibility</p>
+          </div>
+
+          <div className="input-group">
+            <label htmlFor="state">State / Union Territory *</label>
+            <select
+              id="state"
+              name="state"
+              value={formData.state}
+              onChange={handleChange}
+              required
+              style={styles.stateSelect}
+            >
+              <option value="">Select your state or union territory...</option>
+              {INDIAN_STATES_AND_UTS.map((state) => (
+                <option key={state.name} value={state.name}>
+                  {state.name} {state.type === 'ut' ? '(UT)' : ''} - {state.seats} Lok Sabha seats
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="input-group">
+            <label htmlFor="district">District *</label>
+            {formData.state && hasVidhanSabhaData(formData.state) && availableDistricts.length > 0 ? (
+              <select
+                id="district"
+                name="district"
+                value={formData.district}
+                onChange={handleChange}
+                required
+                style={styles.stateSelect}
+              >
+                <option value="">Select your district...</option>
+                {availableDistricts.map((district) => (
+                  <option key={district} value={district}>
+                    {district}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                id="district"
+                name="district"
+                value={formData.district}
+                onChange={handleChange}
+                required
+                placeholder="e.g., Mumbai, Bangalore, New Delhi"
+              />
+            )}
+          </div>
+
+          {formData.state && formData.district && hasVidhanSabhaData(formData.state) && availableConstituencies.length > 0 && (
+            <div className="input-group">
+              <label htmlFor="constituency">Constituency (Vidhan Sabha) *</label>
+              <select
+                id="constituency"
+                name="constituency"
+                value={formData.constituency}
+                onChange={handleChange}
+                required
+                style={styles.stateSelect}
+              >
+                <option value="">Select your constituency...</option>
+                {availableConstituencies.map((constituency) => (
+                  <option key={constituency} value={constituency}>
+                    {constituency}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="input-group">
+            <label htmlFor="ward">Ward/Locality/Panchayat *</label>
+            <input
+              type="text"
+              id="ward"
+              name="ward"
+              value={formData.ward}
+              onChange={handleChange}
+              required
+              placeholder="e.g., Ward 1, Panchayat Name"
+            />
+          </div>
+
           <button 
             type="submit" 
             className="btn btn-primary" 
@@ -286,6 +416,32 @@ const styles = {
     color: 'var(--primary-color)',
     textDecoration: 'none',
     fontWeight: 600
+  },
+  sectionDivider: {
+    marginTop: '2rem',
+    marginBottom: '1rem',
+    paddingTop: '1.5rem',
+    borderTop: '2px solid var(--border-color)'
+  },
+  sectionTitle: {
+    fontSize: '1.25rem',
+    marginBottom: '0.25rem',
+    color: 'var(--text-primary)'
+  },
+  sectionSubtitle: {
+    fontSize: '0.875rem',
+    color: 'var(--text-secondary)',
+    marginBottom: '1rem'
+  },
+  stateSelect: {
+    width: '100%',
+    padding: '0.75rem',
+    fontSize: '1rem',
+    border: '1px solid var(--border-color)',
+    borderRadius: '0.375rem',
+    backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-primary)',
+    cursor: 'pointer'
   }
 }
 
