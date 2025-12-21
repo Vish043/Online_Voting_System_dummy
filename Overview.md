@@ -117,6 +117,13 @@ The system follows a **client-server architecture** with clear separation betwee
   - Personal information (name, DOB, address)
   - National ID verification
   - Contact details
+  - **State and District selection**
+  - **Lok Sabha Constituency** (Parliamentary constituency)
+  - **Vidhan Sabha Constituency** (State Legislative Assembly constituency)
+- **Searchable dropdown menus** for easy selection:
+  - Type to filter and search through options
+  - Keyboard navigation support
+  - Available for all location-based fields
 - Registration status tracking
 - Admin verification workflow
 
@@ -187,8 +194,15 @@ The system follows a **client-server architecture** with clear separation betwee
 - **Create Elections**:
   - Set title, description, and type
   - Configure start and end dates
-  - Define allowed regions
+  - Define allowed regions with **searchable dropdowns**
+  - Select constituencies using **searchable select components**
+  - Choose districts and states with type-to-search functionality
   - Set initial status
+- **Searchable Selection Interface**:
+  - All dropdown menus support search functionality
+  - Type to filter options in real-time
+  - Keyboard navigation (Arrow keys, Enter, Escape)
+  - Clear button for easy reset
 - **Manage Elections**:
   - View all elections (active, scheduled, completed)
   - Update election status (scheduled → active → completed)
@@ -321,6 +335,9 @@ Online_Voting_System_dummy/
 │   │   │   └── api.js               # API service functions
 │   │   ├── config/
 │   │   │   └── firebase.js          # Firebase client configuration
+│   │   ├── constants/
+│   │   │   ├── indianStates.js      # Indian states and union territories data
+│   │   │   └── constituencies.js    # Lok Sabha and Vidhan Sabha constituencies data
 │   │   ├── App.jsx                   # Main app component with routing
 │   │   ├── main.jsx                  # React entry point
 │   │   └── index.css                 # Global styles
@@ -396,9 +413,10 @@ Online_Voting_System_dummy/
 
 #### `POST /api/auth/register`
 Register a new voter account.
-- **Body**: `{ email, password, firstName, lastName, dateOfBirth, nationalId, address, phoneNumber }`
+- **Body**: `{ email, password, firstName, lastName, dateOfBirth, nationalId, address, phoneNumber, state, district, constituency, lokSabhaConstituency }`
 - **Response**: `{ message, user }`
 - **Status**: 201 Created
+- **Note**: `constituency` is Vidhan Sabha (State Assembly), `lokSabhaConstituency` is Parliamentary constituency
 
 #### `GET /api/auth/profile`
 Get current user's profile.
@@ -566,6 +584,10 @@ Stores voter registration information.
   nationalId: string,               // National ID number
   address: string,                  // Physical address
   phoneNumber: string,              // Phone number
+  state: string,                    // State/Union Territory
+  district: string,                 // District name
+  constituency: string,             // Vidhan Sabha (State Assembly) constituency
+  lokSabhaConstituency: string,     // Lok Sabha (Parliamentary) constituency
   isVerified: boolean,              // Admin verification status
   isEligible: boolean,              // Eligibility status
   registeredAt: Timestamp,         // Registration timestamp
@@ -670,6 +692,9 @@ The following composite indexes are required in Firestore:
 
 2. Profile Completion
    ├── Fill personal information
+   ├── Select state and district (with searchable dropdowns)
+   ├── Select Lok Sabha constituency (Parliamentary)
+   ├── Select Vidhan Sabha constituency (State Assembly, if available)
    ├── Submit national ID
    └── Submit for admin verification
 
@@ -791,6 +816,24 @@ The following composite indexes are required in Firestore:
 - ✅ Health check exclusion
 - ✅ Retry mechanism for 429 errors
 - ✅ Better error messaging
+
+### 9. **Enhanced Voter Registration**
+- ✅ **Lok Sabha Constituency** field added (Parliamentary constituency)
+- ✅ **Vidhan Sabha Constituency** field added (State Legislative Assembly constituency)
+- ✅ Removed Ward/Locality/Panchayat field (simplified registration)
+- ✅ Comprehensive constituency data for all Indian states
+- ✅ Automatic constituency filtering based on state and district selection
+
+### 10. **Searchable Dropdown Components**
+- ✅ **SearchableSelect Component**: Reusable searchable dropdown component
+- ✅ **Type-to-Search**: Filter options by typing
+- ✅ **Keyboard Navigation**: Arrow keys, Enter, Escape support
+- ✅ **Clear Functionality**: Easy reset with X button
+- ✅ **Applied to Registration**: All location fields use searchable dropdowns
+- ✅ **Applied to Election Creation**: State, district, and constituency selection
+- ✅ **Smart Value Mapping**: Handles formatted display strings (e.g., "State - X seats")
+- ✅ **Real-time Filtering**: Instant results as you type
+- ✅ **Accessibility**: Full keyboard support and screen reader friendly
 
 ---
 
@@ -959,5 +1002,27 @@ For support and questions:
 
 **Made with ❤️ for Democracy**
 
-*Last Updated: December 2025*
+*Last Updated: January 2025*
+
+---
+
+## 📋 Latest Updates (January 2025)
+
+### Voter Registration Enhancements
+- Added **Lok Sabha Constituency** (Parliamentary) field to voter registration
+- Added **Vidhan Sabha Constituency** (State Assembly) field to voter registration
+- Removed Ward/Locality/Panchayat field for simplified registration process
+- Comprehensive constituency database covering all Indian states and union territories
+
+### User Interface Improvements
+- Implemented **SearchableSelect** component for all dropdown menus
+- Type-to-search functionality across registration and election creation
+- Enhanced user experience with keyboard navigation
+- Real-time filtering of options as users type
+- Clear button for easy field reset
+
+### Election Creation Updates
+- All state, district, and constituency selections now use searchable dropdowns
+- Improved workflow for creating elections with large constituency lists
+- Better handling of formatted display strings (e.g., "State - X seats")
 
