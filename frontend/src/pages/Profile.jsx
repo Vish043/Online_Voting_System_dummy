@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { authAPI } from '../services/api'
-import { User, Mail, Phone, MapPin, Calendar, CheckCircle, AlertCircle } from 'lucide-react'
+import { User, Mail, Phone, MapPin, Calendar, CheckCircle, AlertCircle, ArrowLeft } from 'lucide-react'
 import { INDIAN_STATES_AND_UTS } from '../constants/indianStates'
-import { getDistrictsByState, getConstituenciesByDistrict, hasVidhanSabhaData } from '../constants/constituencies'
+import { getDistrictsByState, getConstituenciesByDistrict, hasVidhanSabhaData, getConstituenciesByState } from '../constants/constituencies'
 
 // Helper function to convert Firestore Timestamp to Date
 function convertTimestampToDate(timestamp) {
@@ -40,10 +40,12 @@ export default function Profile() {
     state: '', 
     district: '', 
     ward: '', 
-    constituency: '' 
+    constituency: '',
+    lokSabhaConstituency: ''
   })
   const [availableDistricts, setAvailableDistricts] = useState([])
   const [availableConstituencies, setAvailableConstituencies] = useState([])
+  const [availableLokSabhaConstituencies, setAvailableLokSabhaConstituencies] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
@@ -56,6 +58,16 @@ export default function Profile() {
     }
     fetchProfile()
   }, [isAdmin, navigate])
+
+  // Update Lok Sabha constituencies when state changes
+  useEffect(() => {
+    if (formData.state) {
+      const lokSabhaConstituencies = getConstituenciesByState(formData.state)
+      setAvailableLokSabhaConstituencies(lokSabhaConstituencies)
+    } else {
+      setAvailableLokSabhaConstituencies([])
+    }
+  }, [formData.state])
 
   // Update districts and constituencies when state or district changes
   useEffect(() => {
@@ -93,7 +105,8 @@ export default function Profile() {
         state: voterData.state || '',
         district: voterData.district || '',
         ward: voterData.ward || '',
-        constituency: voterData.constituency || ''
+        constituency: voterData.constituency || '',
+        lokSabhaConstituency: voterData.lokSabhaConstituency || ''
       })
     } catch (error) {
       console.error('Fetch profile error:', error)
@@ -134,6 +147,10 @@ export default function Profile() {
 
   return (
     <div className="container" style={styles.container}>
+      <button onClick={() => navigate('/dashboard')} className="btn btn-outline" style={styles.backBtn}>
+        <ArrowLeft size={18} />
+        Back to Dashboard
+      </button>
       <h1 style={styles.pageTitle}>My Profile</h1>
 
       {message.text && (
@@ -189,7 +206,7 @@ export default function Profile() {
                   type="tel"
                   value={formData.phoneNumber}
                   onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-                  placeholder="+1 234 567 8900"
+                  placeholder="+91 98765 43210"
                 />
               </div>
               <div className="input-group" style={styles.editField}>
@@ -200,7 +217,7 @@ export default function Profile() {
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                   rows={3}
-                  placeholder="Your address"
+                  placeholder="House No. 123, Sector 5, New Delhi - 110001"
                 />
               </div>
             </>
@@ -229,8 +246,15 @@ export default function Profile() {
               {profile?.constituency && (
                 <ProfileField
                   icon={<MapPin size={20} />}
-                  label="Constituency"
+                  label="Constituency (Vidhan Sabha)"
                   value={profile?.constituency || 'Not provided'}
+                />
+              )}
+              {profile?.lokSabhaConstituency && (
+                <ProfileField
+                  icon={<MapPin size={20} />}
+                  label="Lok Sabha Constituency"
+                  value={profile?.lokSabhaConstituency || 'Not provided'}
                 />
               )}
               <ProfileField
@@ -248,7 +272,7 @@ export default function Profile() {
                 </label>
                 <select
                   value={formData.state}
-                  onChange={(e) => setFormData({ ...formData, state: e.target.value, district: '', constituency: '' })}
+                  onChange={(e) => setFormData({ ...formData, state: e.target.value, district: '', constituency: '', lokSabhaConstituency: '' })}
                   style={styles.stateSelect}
                 >
                   <option value="">Select state...</option>
@@ -288,7 +312,7 @@ export default function Profile() {
               {formData.state && formData.district && hasVidhanSabhaData(formData.state) && availableConstituencies.length > 0 && (
                 <div className="input-group" style={styles.editField}>
                   <label>
-                    <MapPin size={16} style={styles.inlineIcon} /> Constituency
+                    <MapPin size={16} style={styles.inlineIcon} /> Constituency (Vidhan Sabha)
                   </label>
                   <select
                     value={formData.constituency}
@@ -302,6 +326,34 @@ export default function Profile() {
                       </option>
                     ))}
                   </select>
+                </div>
+              )}
+              {formData.state && (
+                <div className="input-group" style={styles.editField}>
+                  <label>
+                    <MapPin size={16} style={styles.inlineIcon} /> Lok Sabha Constituency
+                  </label>
+                  {availableLokSabhaConstituencies.length > 0 ? (
+                    <select
+                      value={formData.lokSabhaConstituency}
+                      onChange={(e) => setFormData({ ...formData, lokSabhaConstituency: e.target.value })}
+                      style={styles.stateSelect}
+                    >
+                      <option value="">Select Lok Sabha constituency...</option>
+                      {availableLokSabhaConstituencies.map((constituency) => (
+                        <option key={constituency} value={constituency}>
+                          {constituency}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={formData.lokSabhaConstituency}
+                      onChange={(e) => setFormData({ ...formData, lokSabhaConstituency: e.target.value })}
+                      placeholder="Enter Lok Sabha constituency"
+                    />
+                  )}
                 </div>
               )}
               <div className="input-group" style={styles.editField}>
@@ -339,7 +391,8 @@ export default function Profile() {
                     state: profile?.state || '',
                     district: profile?.district || '',
                     ward: profile?.ward || '',
-                    constituency: profile?.constituency || ''
+                    constituency: profile?.constituency || '',
+                    lokSabhaConstituency: profile?.lokSabhaConstituency || ''
                   })
                 }}
                 className="btn btn-outline"
@@ -413,7 +466,14 @@ const styles = {
   container: {
     padding: '2rem 1rem',
     maxWidth: '800px',
-    margin: '0 auto'
+    margin: '0 auto',
+    position: 'relative'
+  },
+  backBtn: {
+    marginBottom: '1rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem'
   },
   pageTitle: {
     fontSize: '2rem',

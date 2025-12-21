@@ -100,7 +100,21 @@ export const adminAPI = {
   getStatistics: () => api.get('/admin/statistics'),
   setAdmin: (userId) => api.post('/admin/set-admin', { userId }),
   approveResults: (electionId, approved) => 
-    api.post(`/admin/elections/${electionId}/approve-results`, { approved })
+    api.post(`/admin/elections/${electionId}/approve-results`, { approved }),
+  // Candidate Templates
+  getCandidateTemplates: () => api.get('/admin/candidate-templates'),
+  createCandidateTemplate: (data) => api.post('/admin/candidate-templates', data),
+  updateCandidateTemplate: (templateId, data) => 
+    api.put(`/admin/candidate-templates/${templateId}`, data),
+  deleteCandidateTemplate: (templateId) => 
+    api.delete(`/admin/candidate-templates/${templateId}`),
+  // Party Templates
+  getPartyTemplates: () => api.get('/admin/party-templates'),
+  createPartyTemplate: (data) => api.post('/admin/party-templates', data),
+  updatePartyTemplate: (templateId, data) => 
+    api.put(`/admin/party-templates/${templateId}`, data),
+  deletePartyTemplate: (templateId) => 
+    api.delete(`/admin/party-templates/${templateId}`)
 }
 
 export default api

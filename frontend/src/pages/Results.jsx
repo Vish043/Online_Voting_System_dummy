@@ -164,7 +164,17 @@ function ResultCard({ candidate, rank, totalVotes }) {
         <div style={styles.rankBadge}>#{rank}</div>
         <div style={styles.resultInfo}>
           <h4 style={styles.resultName}>{candidate.name}</h4>
-          <p style={styles.resultParty}>{candidate.party}</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+            {candidate.partySymbol && (
+              <img 
+                src={candidate.partySymbol} 
+                alt={`${candidate.party} symbol`}
+                style={{ width: '32px', height: '32px', objectFit: 'contain' }}
+                onError={(e) => { e.target.style.display = 'none' }}
+              />
+            )}
+            <p style={styles.resultParty}>{candidate.party}</p>
+          </div>
         </div>
       </div>
       <div style={styles.resultStats}>

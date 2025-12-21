@@ -214,7 +214,17 @@ function CandidateOption({ candidate, selected, onSelect }) {
       )}
       <div style={styles.candidateInfo}>
         <h3 style={styles.candidateName}>{candidate.name}</h3>
-        <p style={styles.candidateParty}>{candidate.party}</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+          {candidate.partySymbol && (
+            <img 
+              src={candidate.partySymbol} 
+              alt={`${candidate.party} symbol`}
+              style={{ width: '32px', height: '32px', objectFit: 'contain' }}
+              onError={(e) => { e.target.style.display = 'none' }}
+            />
+          )}
+          <p style={styles.candidateParty}>{candidate.party}</p>
+        </div>
         {candidate.biography && (
           <p style={styles.candidateBio}>{candidate.biography}</p>
         )}

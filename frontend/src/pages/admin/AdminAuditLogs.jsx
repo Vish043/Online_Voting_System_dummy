@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { adminAPI } from '../../services/api'
-import { FileText, Filter, AlertCircle } from 'lucide-react'
+import { FileText, Filter, AlertCircle, ArrowLeft } from 'lucide-react'
 
 // Helper function to convert Firestore Timestamp to Date
 function convertTimestampToDate(timestamp) {
@@ -201,7 +202,14 @@ function renderDetails(log) {
 
 const styles = {
   container: {
-    padding: '2rem 1rem'
+    padding: '2rem 1rem',
+    position: 'relative'
+  },
+  backBtn: {
+    marginBottom: '1rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem'
   },
   pageTitle: {
     fontSize: '2rem',

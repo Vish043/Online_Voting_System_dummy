@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { adminAPI } from '../../services/api'
-import { Plus, Calendar, TrendingUp, CheckCircle, Award, AlertCircle } from 'lucide-react'
+import { Plus, Calendar, TrendingUp, CheckCircle, Award, AlertCircle, ArrowLeft } from 'lucide-react'
 
 // Helper function to convert Firestore Timestamp to Date
 function convertTimestampToDate(timestamp) {
@@ -26,7 +26,17 @@ function convertTimestampToDate(timestamp) {
   return new Date(timestamp);
 }
 
+function formatElectionType(type) {
+  const typeMap = {
+    'national': 'National (Lok Sabha)',
+    'state': 'State (Vidhan Sabha)',
+    'local': 'Zilla Parishad'
+  };
+  return typeMap[type] || type;
+}
+
 export default function AdminElections() {
+  const navigate = useNavigate()
   const [elections, setElections] = useState([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState({ type: '', text: '' })
@@ -84,6 +94,10 @@ export default function AdminElections() {
 
   return (
     <div className="container" style={styles.container}>
+      <button onClick={() => navigate('/admin')} className="btn btn-outline" style={styles.backBtn}>
+        <ArrowLeft size={18} />
+        Back to Admin Dashboard
+      </button>
       <div style={styles.header}>
         <div>
           <h1 style={styles.pageTitle}>Election Management</h1>
@@ -145,7 +159,7 @@ function ElectionCard({ election, onStatusChange, onApproveResults }) {
         <span className={`badge badge-${getStatusColor(election.status)}`}>
           {election.status}
         </span>
-        <span style={styles.type}>{election.type}</span>
+        <span style={styles.type}>{formatElectionType(election.type)}</span>
       </div>
 
       <h3 style={styles.title}>{election.title}</h3>
@@ -250,7 +264,14 @@ function getStatusColor(status) {
 
 const styles = {
   container: {
-    padding: '2rem 1rem'
+    padding: '2rem 1rem',
+    position: 'relative'
+  },
+  backBtn: {
+    marginBottom: '1rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem'
   },
   header: {
     display: 'flex',

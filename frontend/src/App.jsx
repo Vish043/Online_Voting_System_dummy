@@ -17,6 +17,8 @@ import AdminVoters from './pages/admin/AdminVoters'
 import AdminElections from './pages/admin/AdminElections'
 import AdminCreateElection from './pages/admin/AdminCreateElection'
 import AdminAuditLogs from './pages/admin/AdminAuditLogs'
+import AdminCandidateTemplates from './pages/admin/AdminCandidateTemplates'
+import AdminPartyTemplates from './pages/admin/AdminPartyTemplates'
 import NotFound from './pages/NotFound'
 
 // Protected Route Component
@@ -158,6 +160,22 @@ function App() {
               element={
                 <AdminRoute>
                   <AdminAuditLogs />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/candidate-templates"
+              element={
+                <AdminRoute>
+                  <AdminCandidateTemplates />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/party-templates"
+              element={
+                <AdminRoute>
+                  <AdminPartyTemplates />
                 </AdminRoute>
               }
             />

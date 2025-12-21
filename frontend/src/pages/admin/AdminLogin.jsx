@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
-import { Shield, LogIn, AlertCircle } from 'lucide-react'
+import { Shield, LogIn, AlertCircle, ArrowLeft } from 'lucide-react'
 
 export default function AdminLogin() {
   const [email, setEmail] = useState('')
@@ -59,6 +59,10 @@ export default function AdminLogin() {
 
   return (
     <div style={styles.container}>
+      <button onClick={() => navigate('/')} className="btn btn-outline" style={styles.backBtn}>
+        <ArrowLeft size={18} />
+        Back to Home
+      </button>
       <div className="card" style={styles.card}>
         <div style={styles.header}>
           <div style={styles.iconContainer}>
@@ -84,7 +88,7 @@ export default function AdminLogin() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              placeholder="admin@example.com"
+              placeholder="admin@election.gov.in"
             />
           </div>
 
@@ -142,11 +146,22 @@ const styles = {
   container: {
     minHeight: 'calc(100vh - 100px)',
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     padding: '2rem 1rem',
     background: 'linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%)',
-    backgroundSize: 'cover'
+    backgroundSize: 'cover',
+    position: 'relative'
+  },
+  backBtn: {
+    position: 'absolute',
+    top: '2rem',
+    left: '2rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    zIndex: 10
   },
   card: {
     maxWidth: '450px',

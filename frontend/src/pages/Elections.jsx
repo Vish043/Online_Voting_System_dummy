@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { electionsAPI } from '../services/api'
-import { Calendar, Clock, TrendingUp, Award, Filter } from 'lucide-react'
+import { Calendar, Clock, TrendingUp, Award, Filter, ArrowLeft } from 'lucide-react'
 import { INDIAN_STATES_AND_UTS } from '../constants/indianStates'
 import { getDistrictsByState, getConstituenciesByDistrict, hasVidhanSabhaData } from '../constants/constituencies'
 
@@ -29,6 +29,7 @@ function convertTimestampToDate(timestamp) {
 }
 
 export default function Elections() {
+  const navigate = useNavigate()
   const [activeElections, setActiveElections] = useState([])
   const [upcomingElections, setUpcomingElections] = useState([])
   const [completedElections, setCompletedElections] = useState([])
@@ -123,6 +124,10 @@ export default function Elections() {
 
   return (
     <div className="container" style={styles.container}>
+      <button onClick={() => navigate('/dashboard')} className="btn btn-outline" style={styles.backBtn}>
+        <ArrowLeft size={18} />
+        Back to Dashboard
+      </button>
       <h1 style={styles.pageTitle}>Elections</h1>
       <p style={styles.subtitle}>Browse and participate in elections</p>
 
@@ -258,6 +263,15 @@ export default function Elections() {
   )
 }
 
+function formatElectionType(type) {
+  const typeMap = {
+    'national': 'National (Lok Sabha)',
+    'state': 'State (Vidhan Sabha)',
+    'local': 'Zilla Parishad'
+  };
+  return typeMap[type] || type;
+}
+
 function ElectionCard({ election, isActive, isCompleted }) {
   const startDate = convertTimestampToDate(election.startDate);
   const endDate = convertTimestampToDate(election.endDate);
@@ -268,7 +282,7 @@ function ElectionCard({ election, isActive, isCompleted }) {
         <span className={`badge ${isActive ? 'badge-success' : isCompleted ? 'badge-info' : 'badge-info'}`}>
           {isActive ? 'Active' : isCompleted ? 'Completed' : 'Upcoming'}
         </span>
-        <span style={styles.electionType}>{election.type}</span>
+        <span style={styles.electionType}>{formatElectionType(election.type)}</span>
       </div>
 
       <h3 style={styles.electionTitle}>{election.title}</h3>
@@ -327,7 +341,14 @@ function ElectionCard({ election, isActive, isCompleted }) {
 
 const styles = {
   container: {
-    padding: '2rem 1rem'
+    padding: '2rem 1rem',
+    position: 'relative'
+  },
+  backBtn: {
+    marginBottom: '1rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem'
   },
   pageTitle: {
     fontSize: '2rem',

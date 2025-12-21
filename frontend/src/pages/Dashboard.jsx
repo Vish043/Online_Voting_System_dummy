@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { authAPI, electionsAPI, votesAPI } from '../services/api'
-import { Vote, Calendar, CheckCircle, AlertCircle, Clock, TrendingUp, Award } from 'lucide-react'
+import { Vote, Calendar, CheckCircle, AlertCircle, Clock, TrendingUp, Award, ArrowLeft } from 'lucide-react'
 
 export default function Dashboard() {
   const { currentUser, isAdmin } = useAuth()
@@ -73,6 +73,10 @@ export default function Dashboard() {
 
   return (
     <div className="container" style={styles.container}>
+      <button onClick={() => navigate('/')} className="btn btn-outline" style={styles.backBtn}>
+        <ArrowLeft size={18} />
+        Back to Home
+      </button>
       <h1 style={styles.pageTitle}>Dashboard</h1>
       <p style={styles.welcome}>
         Welcome, {currentUser?.displayName || currentUser?.email}!
@@ -302,7 +306,14 @@ function ElectionCard({ election, eligible, isAdmin }) {
 
 const styles = {
   container: {
-    padding: '2rem 1rem'
+    padding: '2rem 1rem',
+    position: 'relative'
+  },
+  backBtn: {
+    marginBottom: '1rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem'
   },
   pageTitle: {
     fontSize: '2rem',

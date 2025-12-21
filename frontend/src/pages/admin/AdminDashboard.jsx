@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { adminAPI } from '../../services/api'
-import { Users, Vote, TrendingUp, CheckCircle, Clock, BarChart, XCircle, AlertCircle, Search } from 'lucide-react'
+import { Users, Vote, TrendingUp, CheckCircle, Clock, BarChart, XCircle, AlertCircle, Search, UserCircle, Building2, ArrowLeft } from 'lucide-react'
 
 export default function AdminDashboard() {
+  const navigate = useNavigate()
   const [statistics, setStatistics] = useState(null)
   const [pendingVoters, setPendingVoters] = useState([])
   const [loading, setLoading] = useState(true)
@@ -125,6 +126,68 @@ export default function AdminDashboard() {
           color="var(--primary-color)"
         />
       </div>
+
+      {/* Party Statistics */}
+      <section style={styles.section}>
+        <h2 style={styles.sectionTitle}>Party Statistics</h2>
+        <div className="grid grid-3" style={styles.statsGrid}>
+          <StatCard
+            icon={<Building2 size={32} />}
+            title="Total Parties"
+            value={statistics?.partiesByLevel?.total || 0}
+            color="var(--primary-color)"
+          />
+          <StatCard
+            icon={<Building2 size={32} />}
+            title="National Parties"
+            value={statistics?.partiesByLevel?.national || 0}
+            color="var(--primary-color)"
+          />
+          <StatCard
+            icon={<Building2 size={32} />}
+            title="State Parties"
+            value={statistics?.partiesByLevel?.state || 0}
+            color="var(--secondary-color)"
+          />
+          <StatCard
+            icon={<Building2 size={32} />}
+            title="Local Parties"
+            value={statistics?.partiesByLevel?.local || 0}
+            color="var(--warning-color)"
+          />
+        </div>
+      </section>
+
+      {/* Candidate Template Statistics */}
+      <section style={styles.section}>
+        <h2 style={styles.sectionTitle}>Candidate Template Statistics</h2>
+        <div className="grid grid-3" style={styles.statsGrid}>
+          <StatCard
+            icon={<UserCircle size={32} />}
+            title="Total Candidates"
+            value={statistics?.candidatesByType?.total || 0}
+            color="var(--primary-color)"
+          />
+          <StatCard
+            icon={<UserCircle size={32} />}
+            title="Lok Sabha Candidates"
+            value={statistics?.candidatesByType?.lokSabha || 0}
+            color="var(--primary-color)"
+          />
+          <StatCard
+            icon={<UserCircle size={32} />}
+            title="Vidhan Sabha Candidates"
+            value={statistics?.candidatesByType?.vidhanSabha || 0}
+            color="var(--secondary-color)"
+          />
+          <StatCard
+            icon={<UserCircle size={32} />}
+            title="Zilla Parishad Candidates"
+            value={statistics?.candidatesByType?.zillaParishad || 0}
+            color="var(--warning-color)"
+          />
+        </div>
+      </section>
 
       {/* Pending Voters Verification Section */}
       {(pendingVoters.length > 0 || votersLoading || statistics?.pendingVerification > 0) && (
@@ -277,6 +340,18 @@ export default function AdminDashboard() {
             description="View system activity and security logs"
             link="/admin/audit-logs"
             icon={<BarChart size={40} />}
+          />
+          <ActionCard
+            title="Party Templates"
+            description="Store and manage party information and symbols"
+            link="/admin/party-templates"
+            icon={<Building2 size={40} />}
+          />
+          <ActionCard
+            title="Candidate Templates"
+            description="Store and manage reusable candidate information"
+            link="/admin/candidate-templates"
+            icon={<UserCircle size={40} />}
           />
         </div>
       </section>

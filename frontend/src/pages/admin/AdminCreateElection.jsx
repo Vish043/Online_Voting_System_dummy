@@ -1,7 +1,7 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
 import { adminAPI } from '../../services/api'
-import { Plus, Trash2, CheckCircle, AlertCircle, ArrowLeft } from 'lucide-react'
+import { Plus, Trash2, CheckCircle, AlertCircle, ArrowLeft, UserCircle, X } from 'lucide-react'
 import { INDIAN_STATES_AND_UTS } from '../../constants/indianStates'
 import { 
   getConstituenciesByState, 
@@ -9,6 +9,7 @@ import {
   getConstituenciesByDistrict,
   hasVidhanSabhaData 
 } from '../../constants/constituencies'
+import SearchableSelect from '../../components/SearchableSelect'
 
 export default function AdminCreateElection() {
   const navigate = useNavigate()
@@ -24,11 +25,139 @@ export default function AdminCreateElection() {
   })
   const [regionInput, setRegionInput] = useState('')
   const [selectedDistrict, setSelectedDistrict] = useState('')
+  const [selectedStateForZillaParishad, setSelectedStateForZillaParishad] = useState('')
+  const [availableDistrictsForZillaParishad, setAvailableDistrictsForZillaParishad] = useState([])
   const [candidates, setCandidates] = useState([
-    { name: '', party: '', biography: '', photoURL: '' }
+    { name: '', party: '', biography: '', photoURL: '', photoType: 'url', partySymbol: '', partySymbolType: 'url', partyDescription: '' }
   ])
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
+  const [templates, setTemplates] = useState([])
+  const [showTemplateModal, setShowTemplateModal] = useState(false)
+  const [templateLoading, setTemplateLoading] = useState(false)
+  const [filteredCandidateTemplates, setFilteredCandidateTemplates] = useState([])
+  const [partyTemplates, setPartyTemplates] = useState([])
+
+  // Update available districts when state is selected for Zilla Parishad
+  useEffect(() => {
+    if (electionData.type === 'local' && selectedStateForZillaParishad) {
+      if (hasVidhanSabhaData(selectedStateForZillaParishad)) {
+        const districts = getDistrictsByState(selectedStateForZillaParishad)
+        setAvailableDistrictsForZillaParishad(districts)
+      } else {
+        setAvailableDistrictsForZillaParishad([])
+      }
+    } else {
+      setAvailableDistrictsForZillaParishad([])
+    }
+  }, [selectedStateForZillaParishad, electionData.type])
+
+  // Fetch templates when modal opens
+  useEffect(() => {
+    if (showTemplateModal) {
+      fetchTemplates()
+    }
+  }, [showTemplateModal])
+
+  // Fetch candidate templates based on election type and constituency
+  useEffect(() => {
+    if (electionData.type && (electionData.constituency || (electionData.type === 'local' && electionData.allowedRegions.length > 0))) {
+      fetchFilteredCandidateTemplates()
+    } else {
+      setFilteredCandidateTemplates([])
+    }
+  }, [electionData.type, electionData.constituency, electionData.allowedRegions, electionData.regionHierarchy.district, electionData.regionHierarchy.state, selectedDistrict])
+
+  // Fetch party templates on mount
+  useEffect(() => {
+    fetchPartyTemplates()
+  }, [])
+
+  async function fetchTemplates() {
+    try {
+      setTemplateLoading(true)
+      const res = await adminAPI.getCandidateTemplates()
+      setTemplates(res.data.templates || [])
+    } catch (error) {
+      console.error('Fetch templates error:', error)
+      setMessage({ type: 'error', text: 'Failed to load templates' })
+    } finally {
+      setTemplateLoading(false)
+    }
+  }
+
+  async function fetchFilteredCandidateTemplates() {
+    try {
+      const res = await adminAPI.getCandidateTemplates()
+      const allTemplates = res.data.templates || []
+      
+      // Map election type
+      let electionTypeFilter = ''
+      if (electionData.type === 'national') {
+        electionTypeFilter = 'Lok Sabha'
+      } else if (electionData.type === 'state') {
+        electionTypeFilter = 'Vidhan Sabha'
+      } else if (electionData.type === 'local') {
+        electionTypeFilter = 'Zilla Parishad'
+      }
+
+      // Filter templates based on election type
+      let filtered = allTemplates.filter(t => t.electionType === electionTypeFilter)
+
+      // Filter by location based on election type
+      if (electionData.type === 'national' && electionData.constituency && electionData.allowedRegions.length > 0) {
+        const state = electionData.allowedRegions[0]
+        filtered = filtered.filter(t => 
+          t.lokSabhaConstituency === electionData.constituency &&
+          t.state === state
+        )
+      } else if (electionData.type === 'state' && electionData.constituency && electionData.allowedRegions.length > 0 && selectedDistrict) {
+        const state = electionData.allowedRegions[0]
+        filtered = filtered.filter(t => 
+          t.vidhanSabhaConstituency === electionData.constituency &&
+          t.district === selectedDistrict &&
+          t.state === state
+        )
+      } else if (electionData.type === 'local' && electionData.allowedRegions.length > 0 && electionData.regionHierarchy.state) {
+        const district = electionData.allowedRegions[0] // For local, districts are in allowedRegions
+        filtered = filtered.filter(t => 
+          t.district === district &&
+          t.state === electionData.regionHierarchy.state
+        )
+      }
+
+      setFilteredCandidateTemplates(filtered)
+    } catch (error) {
+      console.error('Fetch filtered templates error:', error)
+      setFilteredCandidateTemplates([])
+    }
+  }
+
+  async function fetchPartyTemplates() {
+    try {
+      const res = await adminAPI.getPartyTemplates()
+      setPartyTemplates(res.data.templates || [])
+    } catch (error) {
+      console.error('Fetch party templates error:', error)
+    }
+  }
+
+  function applyTemplate(template) {
+    const newCandidate = {
+      name: template.candidateName || '',
+      party: template.partyName || '',
+      biography: template.candidateDescription || '',
+      photoURL: template.candidatePhoto || '',
+      photoType: template.candidatePhoto?.startsWith('data:') ? 'file' : 'url',
+      partySymbol: template.partySymbol || '',
+      partySymbolType: template.partySymbol?.startsWith('data:') ? 'file' : 'url'
+    }
+    
+    setCandidates([...candidates, newCandidate])
+    setShowTemplateModal(false)
+    setMessage({ type: 'success', text: 'Template applied successfully' })
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000)
+  }
 
   function handleElectionChange(e) {
     const { name, value } = e.target
@@ -41,6 +170,8 @@ export default function AdminCreateElection() {
     // Clear district selection when type changes or constituency is cleared
     if (name === 'type' || (name === 'constituency' && value === '')) {
       setSelectedDistrict('')
+      setSelectedStateForZillaParishad('')
+      setAvailableDistrictsForZillaParishad([])
     }
   }
 
@@ -79,13 +210,133 @@ export default function AdminCreateElection() {
   }
 
   function handleCandidateChange(index, field, value) {
+    // Check for duplicate candidate name
+    if (field === 'name' && value) {
+      const duplicateIndex = candidates.findIndex((c, i) => 
+        i !== index && c.name && c.name.toLowerCase().trim() === value.toLowerCase().trim()
+      )
+      if (duplicateIndex !== -1) {
+        setMessage({ 
+          type: 'error', 
+          text: `This candidate "${value}" is already added as Candidate ${duplicateIndex + 1}. Each candidate can only be added once.` 
+        })
+        setTimeout(() => setMessage({ type: '', text: '' }), 5000)
+        return
+      }
+    }
+    
     const newCandidates = [...candidates]
     newCandidates[index][field] = value
     setCandidates(newCandidates)
   }
 
+  function handlePartySymbolTypeChange(index, type) {
+    const newCandidates = [...candidates]
+    newCandidates[index].partySymbolType = type
+    newCandidates[index].partySymbol = '' // Clear symbol when switching type
+    setCandidates(newCandidates)
+  }
+
+  function handlePartySymbolFileChange(index, file) {
+    if (!file) return
+    
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      const newCandidates = [...candidates]
+      newCandidates[index].partySymbol = reader.result // Base64 data URL
+      setCandidates(newCandidates)
+    }
+    reader.onerror = () => {
+      setMessage({ type: 'error', text: 'Failed to read file' })
+    }
+    reader.readAsDataURL(file)
+  }
+
+  function handlePhotoTypeChange(index, type) {
+    const newCandidates = [...candidates]
+    newCandidates[index].photoType = type
+    newCandidates[index].photoURL = '' // Clear photo when switching type
+    setCandidates(newCandidates)
+  }
+
+  function handlePhotoFileChange(index, file) {
+    if (!file) return
+    
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      const newCandidates = [...candidates]
+      newCandidates[index].photoURL = reader.result // Base64 data URL
+      setCandidates(newCandidates)
+    }
+    reader.onerror = () => {
+      setMessage({ type: 'error', text: 'Failed to read file' })
+    }
+    reader.readAsDataURL(file)
+  }
+
   function addCandidate() {
-    setCandidates([...candidates, { name: '', party: '', biography: '', photoURL: '' }])
+    setCandidates([...candidates, { name: '', party: '', biography: '', photoURL: '', photoType: 'url', partySymbol: '', partySymbolType: 'url', partyDescription: '' }])
+  }
+
+  function handleCandidateTemplateSelect(index, candidateName) {
+    // Check for duplicate candidate name
+    if (candidateName) {
+      const duplicateIndex = candidates.findIndex((c, i) => 
+        i !== index && c.name && c.name.toLowerCase().trim() === candidateName.toLowerCase().trim()
+      )
+      if (duplicateIndex !== -1) {
+        setMessage({ 
+          type: 'error', 
+          text: `This candidate "${candidateName}" is already added as Candidate ${duplicateIndex + 1}. Each candidate can only be added once.` 
+        })
+        setTimeout(() => setMessage({ type: '', text: '' }), 5000)
+        return
+      }
+    }
+
+    const selectedTemplate = filteredCandidateTemplates.find(t => t.candidateName === candidateName)
+    if (selectedTemplate) {
+      // Find party template to get party description
+      const partyTemplate = partyTemplates.find(pt => pt.partyName === selectedTemplate.partyName)
+      
+      const newCandidates = [...candidates]
+      newCandidates[index] = {
+        name: selectedTemplate.candidateName || '',
+        party: selectedTemplate.partyName || '',
+        biography: selectedTemplate.candidateDescription || '',
+        photoURL: selectedTemplate.candidatePhoto || '',
+        photoType: selectedTemplate.candidatePhoto?.startsWith('data:') ? 'file' : 'url',
+        partySymbol: selectedTemplate.partySymbol || '',
+        partySymbolType: selectedTemplate.partySymbol?.startsWith('data:') ? 'file' : 'url',
+        partyDescription: partyTemplate?.partyHistory || ''
+      }
+      setCandidates(newCandidates)
+    } else if (candidateName) {
+      // If it's a custom name (not from template), just set the name
+      const newCandidates = [...candidates]
+      newCandidates[index].name = candidateName
+      setCandidates(newCandidates)
+    }
+  }
+
+  function handlePartyTemplateSelect(index, partyName) {
+    const partyTemplate = partyTemplates.find(pt => pt.partyName === partyName)
+    if (partyTemplate) {
+      const newCandidates = [...candidates]
+      newCandidates[index] = {
+        ...newCandidates[index],
+        party: partyTemplate.partyName || '',
+        partySymbol: partyTemplate.partySymbol || '',
+        partySymbolType: partyTemplate.partySymbol?.startsWith('data:') ? 'file' : 'url',
+        partyDescription: partyTemplate.partyHistory || ''
+      }
+      setCandidates(newCandidates)
+    } else {
+      // If not found in templates, just set the party name
+      const newCandidates = [...candidates]
+      newCandidates[index].party = partyName
+      setCandidates(newCandidates)
+    }
   }
 
   function removeCandidate(index) {
@@ -109,6 +360,16 @@ export default function AdminCreateElection() {
       return
     }
 
+    // Check for duplicate candidate names
+    const candidateNames = candidates
+      .map(c => c.name?.toLowerCase().trim())
+      .filter(name => name)
+    const uniqueNames = new Set(candidateNames)
+    if (candidateNames.length !== uniqueNames.size) {
+      setMessage({ type: 'error', text: 'Duplicate candidates detected. Each candidate can only be added once.' })
+      return
+    }
+
     // Validate regions based on election type
     if (electionData.type === 'state' && electionData.allowedRegions.length === 0) {
       setMessage({ type: 'error', text: 'State elections require at least one allowed region (state name)' })
@@ -116,7 +377,7 @@ export default function AdminCreateElection() {
     }
 
     if (electionData.type === 'local' && electionData.allowedRegions.length === 0) {
-      setMessage({ type: 'error', text: 'Local elections require at least one allowed region (district/ward name)' })
+      setMessage({ type: 'error', text: 'Zilla Parishad elections require at least one allowed region (district name)' })
       return
     }
 
@@ -124,6 +385,34 @@ export default function AdminCreateElection() {
     if (validCandidates.length < 2) {
       setMessage({ type: 'error', text: 'Please add at least 2 candidates with name and party' })
       return
+    }
+
+    // Validate: No two candidates from the same party for the same seat/location
+    const partyLocationMap = new Map()
+    for (const candidate of validCandidates) {
+      // Create a unique key based on party and location (constituency for national/state, district for local)
+      let locationKey
+      if (electionData.type === 'national' || electionData.type === 'state') {
+        locationKey = electionData.constituency || 'unknown'
+      } else if (electionData.type === 'local') {
+        // For local elections, use the first allowed region (district) as location
+        locationKey = electionData.allowedRegions[0] || 'unknown'
+      } else {
+        locationKey = 'unknown'
+      }
+
+      const key = `${candidate.party.toLowerCase().trim()}_${locationKey.toLowerCase().trim()}`
+      
+      if (partyLocationMap.has(key)) {
+        const existingCandidate = partyLocationMap.get(key)
+        setMessage({ 
+          type: 'error', 
+          text: `Error: Multiple candidates from "${candidate.party}" cannot stand for the same seat/location. "${existingCandidate.name}" and "${candidate.name}" are both from the same party.` 
+        })
+        return
+      }
+      
+      partyLocationMap.set(key, candidate)
     }
 
     try {
@@ -148,7 +437,9 @@ export default function AdminCreateElection() {
 
       // Add candidates
       for (const candidate of validCandidates) {
-        await adminAPI.addCandidate(electionId, candidate)
+        // Remove UI-only fields before sending
+        const { partySymbolType, photoType, ...candidateData } = candidate
+        await adminAPI.addCandidate(electionId, candidateData)
       }
 
       setMessage({ type: 'success', text: 'Election created successfully!' })
@@ -194,7 +485,7 @@ export default function AdminCreateElection() {
               value={electionData.title}
               onChange={handleElectionChange}
               required
-              placeholder="e.g., Presidential Election 2024"
+              placeholder="e.g., Lok Sabha Election 2024 - Delhi"
             />
           </div>
 
@@ -222,7 +513,7 @@ export default function AdminCreateElection() {
             >
               <option value="national">National (Lok Sabha) - Elects MP</option>
               <option value="state">State (Vidhan Sabha) - Elects MLA</option>
-              <option value="local">Local (Municipality/Panchayat) - Elects Councillor/Sarpanch</option>
+              <option value="local">Zilla Parishad - Elects Zilla Parishad Member</option>
             </select>
             <div style={styles.typeDescription}>
               {electionData.type === 'national' && (
@@ -239,8 +530,8 @@ export default function AdminCreateElection() {
               )}
               {electionData.type === 'local' && (
                 <p style={styles.descriptionText}>
-                  <strong>Municipality/Panchayat Election:</strong> Local-level election. Only voters from selected districts/wards are eligible. 
-                  Winners become Councillors (municipal) or Sarpanch (panchayat).
+                  <strong>Zilla Parishad Election:</strong> District-level election. Only voters from selected districts are eligible. 
+                  Winners become Zilla Parishad Members.
                 </p>
               )}
             </div>
@@ -255,7 +546,7 @@ export default function AdminCreateElection() {
               </p>
               <div>
                 <label style={styles.selectLabel}>Select State/UT:</label>
-                <select
+                <SearchableSelect
                   value={regionInput}
                   onChange={(e) => {
                     const selectedState = e.target.value
@@ -275,15 +566,15 @@ export default function AdminCreateElection() {
                       })
                     }
                   }}
-                  style={styles.stateSelect}
-                >
-                  <option value="">Choose a state or union territory...</option>
-                  {INDIAN_STATES_AND_UTS.map((state) => (
-                    <option key={state.name} value={state.name}>
-                      {state.name} ({state.seats} seats)
-                    </option>
-                  ))}
-                </select>
+                  options={INDIAN_STATES_AND_UTS.map((state) => 
+                    `${state.name} (${state.seats} seats)`
+                  )}
+                  getOptionValue={(option) => {
+                    const match = option.match(/^([^(]+?)\s*\(/)
+                    return match ? match[1].trim() : option
+                  }}
+                  placeholder="Choose a state or union territory..."
+                />
                 {electionData.allowedRegions.length > 0 && (
                   <div style={styles.selectedStateInfo}>
                     <span className="badge badge-success">
@@ -307,55 +598,21 @@ export default function AdminCreateElection() {
           ) : (
             <div style={styles.regionSection}>
               <h3 style={styles.subsectionTitle}>
-                {electionData.type === 'state' ? 'Allowed States' : 'Allowed Districts/Wards'}
+                {electionData.type === 'state' ? 'Allowed States' : 'Allowed Districts'}
               </h3>
               <p style={styles.regionHelp}>
                 {electionData.type === 'state' 
                   ? 'Add state names. Only voters from these states will be eligible to vote.'
-                  : 'Add district or ward names. Only voters from these regions will be eligible to vote.'}
+                  : 'Select a state first, then choose districts. Only voters from selected districts will be eligible to vote.'}
               </p>
 
-              {/* Region Hierarchy (for reference) */}
-              <div style={styles.row}>
-                {electionData.type === 'local' && (
-                  <>
-                    <div className="input-group">
-                      <label>State (Reference)</label>
-                      <input
-                        type="text"
-                        value={electionData.regionHierarchy.state}
-                        onChange={(e) => handleRegionHierarchyChange('state', e.target.value)}
-                        placeholder="e.g., Maharashtra"
-                      />
-                    </div>
-                    <div className="input-group">
-                      <label>District (Reference)</label>
-                      <input
-                        type="text"
-                        value={electionData.regionHierarchy.district}
-                        onChange={(e) => handleRegionHierarchyChange('district', e.target.value)}
-                        placeholder="e.g., Mumbai"
-                      />
-                    </div>
-                    <div className="input-group">
-                      <label>Ward (Reference)</label>
-                      <input
-                        type="text"
-                        value={electionData.regionHierarchy.ward}
-                        onChange={(e) => handleRegionHierarchyChange('ward', e.target.value)}
-                        placeholder="e.g., Ward 1"
-                      />
-                    </div>
-                  </>
-                )}
-              </div>
 
               {/* Add Regions */}
               <div style={styles.addRegionSection}>
                 {electionData.type === 'state' ? (
                   <div>
                     <label style={styles.selectLabel}>Select State/UT:</label>
-                    <select
+                    <SearchableSelect
                       value={regionInput}
                       onChange={(e) => {
                         const selectedState = e.target.value
@@ -368,21 +625,19 @@ export default function AdminCreateElection() {
                           // Don't update allowedRegions here - let addRegion handle it
                         })
                       }}
-                      style={styles.stateSelect}
-                    >
-                      <option value="">Choose a state or union territory...</option>
-                      {INDIAN_STATES_AND_UTS.map((state) => {
+                      options={INDIAN_STATES_AND_UTS.map((state) => {
                         const vidhanSabhaSeats = state.vidhanSabhaSeats
                         const seatInfo = vidhanSabhaSeats 
                           ? `${vidhanSabhaSeats} Assembly seats`
                           : 'No Assembly'
-                        return (
-                          <option key={state.name} value={state.name}>
-                            {state.name} ({seatInfo})
-                          </option>
-                        )
+                        return `${state.name} (${seatInfo})`
                       })}
-                    </select>
+                      getOptionValue={(option) => {
+                        const match = option.match(/^([^(]+?)\s*\(/)
+                        return match ? match[1].trim() : option
+                      }}
+                      placeholder="Choose a state or union territory..."
+                    />
                     <button
                       type="button"
                       onClick={() => {
@@ -398,27 +653,101 @@ export default function AdminCreateElection() {
                       Add State
                     </button>
                   </div>
-                ) : (
-                  <div style={styles.addRegionInput}>
-                    <input
-                      type="text"
-                      value={regionInput}
-                      onChange={(e) => setRegionInput(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addRegion())}
-                      placeholder="Enter district or ward name (e.g., Mumbai, Ward 1)"
-                      style={styles.regionInput}
-                    />
-                    <button
-                      type="button"
-                      onClick={addRegion}
-                      className="btn btn-secondary"
-                      style={styles.addRegionBtn}
-                    >
-                      <Plus size={16} />
-                      Add
-                    </button>
+                ) : electionData.type === 'local' ? (
+                  <div>
+                    <div style={{ marginBottom: '1rem' }}>
+                      <label style={styles.selectLabel}>Select State/UT:</label>
+                      <SearchableSelect
+                        value={selectedStateForZillaParishad}
+                        onChange={(e) => {
+                          const selectedState = e.target.value
+                          setSelectedStateForZillaParishad(selectedState)
+                          setRegionInput('') // Clear district input when state changes
+                          setElectionData({
+                            ...electionData,
+                            regionHierarchy: {
+                              ...electionData.regionHierarchy,
+                              state: selectedState
+                            }
+                          })
+                        }}
+                        options={INDIAN_STATES_AND_UTS.map((state) => 
+                          `${state.name}${state.type === 'ut' ? ' (UT)' : ''} - ${state.seats} Lok Sabha seats`
+                        )}
+                        getOptionValue={(option) => {
+                          const match = option.match(/^([^(]+?)(?:\s*\(UT\))?\s*-/)
+                          return match ? match[1].trim() : option
+                        }}
+                        placeholder="Choose a state or union territory..."
+                      />
+                    </div>
+                    {selectedStateForZillaParishad && (
+                      <div>
+                        <label style={styles.selectLabel}>Select District:</label>
+                        {availableDistrictsForZillaParishad.length > 0 ? (
+                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
+                            <div style={{ flex: 1 }}>
+                              <SearchableSelect
+                                value={regionInput}
+                                onChange={(e) => {
+                                  setRegionInput(e.target.value)
+                                }}
+                                options={availableDistrictsForZillaParishad}
+                                placeholder="Choose a district..."
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (regionInput) {
+                                  addRegion()
+                                  setRegionInput('')
+                                }
+                              }}
+                              className="btn btn-secondary"
+                              style={styles.addRegionBtn}
+                              disabled={!regionInput}
+                            >
+                              <Plus size={16} />
+                              Add District
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
+                            <input
+                              type="text"
+                              value={regionInput}
+                              onChange={(e) => setRegionInput(e.target.value)}
+                              onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addRegion())}
+                              placeholder="Enter district name (e.g., Mumbai, Pune)"
+                              style={{ ...styles.regionInput, flex: 1 }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (regionInput) {
+                                  addRegion()
+                                  setRegionInput('')
+                                }
+                              }}
+                              className="btn btn-secondary"
+                              style={styles.addRegionBtn}
+                              disabled={!regionInput}
+                            >
+                              <Plus size={16} />
+                              Add District
+                            </button>
+                          </div>
+                        )}
+                        {selectedStateForZillaParishad && availableDistrictsForZillaParishad.length === 0 && (
+                          <small style={styles.helpText}>
+                            No predefined districts found for {selectedStateForZillaParishad}. Please enter district name manually.
+                          </small>
+                        )}
+                      </div>
+                    )}
                   </div>
-                )}
+                ) : null}
               </div>
 
               {/* Display Added Regions */}
@@ -455,21 +784,15 @@ export default function AdminCreateElection() {
                 const constituencies = getConstituenciesByState(selectedState)
                 return constituencies.length > 0 ? (
                   <>
-                    <select
+                    <SearchableSelect
                       id="constituency"
                       name="constituency"
                       value={electionData.constituency}
                       onChange={handleElectionChange}
-                      style={styles.constituencySelect}
+                      options={constituencies}
+                      placeholder={`-- Select a constituency from ${selectedState} --`}
                       required
-                    >
-                      <option value="">-- Select a constituency from {selectedState} --</option>
-                      {constituencies.map((constituency) => (
-                        <option key={constituency} value={constituency}>
-                          {constituency}
-                        </option>
-                      ))}
-                    </select>
+                    />
                     <small style={styles.helpText}>
                       Showing {constituencies.length} constituencies for {selectedState}. Select one from the dropdown above.
                     </small>
@@ -503,42 +826,30 @@ export default function AdminCreateElection() {
                     {/* District Selection */}
                     <div style={{ marginBottom: '1rem' }}>
                       <label style={styles.selectLabel}>Select District:</label>
-                      <select
+                      <SearchableSelect
                         value={selectedDistrict}
                         onChange={(e) => {
                           setSelectedDistrict(e.target.value)
                           setElectionData({ ...electionData, constituency: '' }) // Clear constituency when district changes
                         }}
-                        style={styles.stateSelect}
+                        options={districts}
+                        placeholder="-- Select a district --"
                         required
-                      >
-                        <option value="">-- Select a district --</option>
-                        {districts.map((district) => (
-                          <option key={district} value={district}>
-                            {district}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </div>
                     
                     {/* Constituency Selection */}
                     {selectedDistrict && constituencies.length > 0 ? (
                       <>
-                        <select
+                        <SearchableSelect
                           id="constituency"
                           name="constituency"
                           value={electionData.constituency}
                           onChange={handleElectionChange}
-                          style={styles.constituencySelect}
+                          options={constituencies}
+                          placeholder={`-- Select a constituency from ${selectedDistrict} --`}
                           required
-                        >
-                          <option value="">-- Select a constituency from {selectedDistrict} --</option>
-                          {constituencies.map((constituency) => (
-                            <option key={constituency} value={constituency}>
-                              {constituency}
-                            </option>
-                          ))}
-                        </select>
+                        />
                         <small style={styles.helpText}>
                           Showing {constituencies.length} constituencies for {selectedDistrict} district. Select one from the dropdown above.
                         </small>
@@ -577,7 +888,7 @@ export default function AdminCreateElection() {
                   placeholder={
                     electionData.type === 'national' ? 'Select a state above first to see constituencies, or enter manually' :
                     electionData.type === 'state' ? 'Select a state above first, or enter constituency name manually (e.g., Mumbai South)' :
-                    'e.g., Ward 1, Panchayat Name'
+                    'e.g., Zilla Parishad Constituency Name'
                   }
                   required={electionData.type === 'national' ? false : true}
                 />
@@ -657,22 +968,63 @@ export default function AdminCreateElection() {
                 <div style={styles.row}>
                   <div className="input-group">
                     <label>Name *</label>
-                    <input
-                      type="text"
-                      value={candidate.name}
-                      onChange={(e) => handleCandidateChange(index, 'name', e.target.value)}
-                      placeholder="Candidate name"
-                      required
-                    />
+                    {filteredCandidateTemplates.length > 0 ? (
+                      <SearchableSelect
+                        value={candidate.name}
+                        onChange={(e) => {
+                          const candidateName = e.target.value
+                          if (candidateName) {
+                            handleCandidateTemplateSelect(index, candidateName)
+                          } else {
+                            handleCandidateChange(index, 'name', '')
+                          }
+                        }}
+                        options={filteredCandidateTemplates
+                          .map(t => t.candidateName)
+                          .filter(name => {
+                            // Exclude candidate names that are already used in other candidate entries
+                            const isUsed = candidates.some((c, i) => 
+                              i !== index && 
+                              c.name && 
+                              c.name.toLowerCase().trim() === name.toLowerCase().trim()
+                            )
+                            return !isUsed
+                          })}
+                        placeholder="Select candidate name"
+                        allowCustom={true}
+                        required
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={candidate.name}
+                        onChange={(e) => handleCandidateChange(index, 'name', e.target.value)}
+                        placeholder="Name"
+                        required
+                      />
+                    )}
+                    {filteredCandidateTemplates.length === 0 && electionData.type && (electionData.constituency || electionData.regionHierarchy.district) && (
+                      <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                        No candidate templates found for this election type and location. You can type a custom name.
+                      </p>
+                    )}
                   </div>
 
                   <div className="input-group">
                     <label>Party *</label>
-                    <input
-                      type="text"
+                    <SearchableSelect
                       value={candidate.party}
-                      onChange={(e) => handleCandidateChange(index, 'party', e.target.value)}
-                      placeholder="Political party"
+                      onChange={(e) => {
+                        const partyName = e.target.value
+                        if (partyName) {
+                          handlePartyTemplateSelect(index, partyName)
+                        } else {
+                          handleCandidateChange(index, 'party', '')
+                        }
+                      }}
+                      options={partyTemplates.map(t => t.partyName)}
+                      placeholder="Type party name"
+                      allowCustom={true}
                       required
                     />
                   </div>
@@ -684,23 +1036,280 @@ export default function AdminCreateElection() {
                     value={candidate.biography}
                     onChange={(e) => handleCandidateChange(index, 'biography', e.target.value)}
                     rows={2}
-                    placeholder="Brief biography or campaign message"
+                    placeholder="e.g., Experienced leader committed to development and progress"
                   />
                 </div>
 
                 <div className="input-group">
-                  <label>Photo URL</label>
-                  <input
-                    type="url"
-                    value={candidate.photoURL}
-                    onChange={(e) => handleCandidateChange(index, 'photoURL', e.target.value)}
-                    placeholder="https://example.com/photo.jpg"
+                  <label>Candidate Photo</label>
+                  <div style={{ marginBottom: '0.5rem' }}>
+                    <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.5rem' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name={`photoType-${index}`}
+                          value="url"
+                          checked={candidate.photoType === 'url'}
+                          onChange={(e) => handlePhotoTypeChange(index, 'url')}
+                        />
+                        <span>URL</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name={`photoType-${index}`}
+                          value="file"
+                          checked={candidate.photoType === 'file'}
+                          onChange={(e) => handlePhotoTypeChange(index, 'file')}
+                        />
+                        <span>Upload File</span>
+                      </label>
+                    </div>
+                  </div>
+                  {candidate.photoType === 'url' ? (
+                    <input
+                      type="url"
+                      value={candidate.photoURL}
+                      onChange={(e) => handleCandidateChange(index, 'photoURL', e.target.value)}
+                      placeholder="https://example.com/candidate-photo.jpg"
+                    />
+                  ) : (
+                    <div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) {
+                            // Validate file size (max 2MB)
+                            if (file.size > 2 * 1024 * 1024) {
+                              setMessage({ type: 'error', text: 'File size must be less than 2MB' })
+                              return
+                            }
+                            // Validate file type
+                            if (!file.type.startsWith('image/')) {
+                              setMessage({ type: 'error', text: 'Please upload an image file' })
+                              return
+                            }
+                            handlePhotoFileChange(index, file)
+                          }
+                        }}
+                        style={{ marginBottom: '0.5rem' }}
+                      />
+                      {candidate.photoURL && (
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <img 
+                            src={candidate.photoURL} 
+                            alt="Photo Preview" 
+                            style={{ maxWidth: '150px', maxHeight: '150px', objectFit: 'contain', border: '1px solid var(--border-color)', borderRadius: '0.25rem', padding: '0.25rem' }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleCandidateChange(index, 'photoURL', '')}
+                            className="btn btn-outline"
+                            style={{ marginLeft: '0.5rem', padding: '0.25rem 0.5rem', fontSize: '0.875rem' }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {candidate.photoURL && candidate.photoType === 'url' && (
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <img 
+                        src={candidate.photoURL} 
+                        alt="Photo Preview" 
+                        onError={(e) => { e.target.style.display = 'none' }}
+                        style={{ maxWidth: '150px', maxHeight: '150px', objectFit: 'contain', border: '1px solid var(--border-color)', borderRadius: '0.25rem', padding: '0.25rem' }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="input-group">
+                  <label>Party Symbol</label>
+                  <div style={{ marginBottom: '0.5rem' }}>
+                    <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.5rem' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name={`partySymbolType-${index}`}
+                          value="url"
+                          checked={candidate.partySymbolType === 'url'}
+                          onChange={(e) => handlePartySymbolTypeChange(index, 'url')}
+                        />
+                        <span>URL</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name={`partySymbolType-${index}`}
+                          value="file"
+                          checked={candidate.partySymbolType === 'file'}
+                          onChange={(e) => handlePartySymbolTypeChange(index, 'file')}
+                        />
+                        <span>Upload File</span>
+                      </label>
+                    </div>
+                  </div>
+                  {candidate.partySymbolType === 'url' ? (
+                    <input
+                      type="url"
+                      value={candidate.partySymbol}
+                      onChange={(e) => handleCandidateChange(index, 'partySymbol', e.target.value)}
+                      placeholder="https://example.com/party-symbol.png"
+                    />
+                  ) : (
+                    <div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) {
+                            // Validate file size (max 2MB)
+                            if (file.size > 2 * 1024 * 1024) {
+                              setMessage({ type: 'error', text: 'File size must be less than 2MB' })
+                              return
+                            }
+                            // Validate file type
+                            if (!file.type.startsWith('image/')) {
+                              setMessage({ type: 'error', text: 'Please upload an image file' })
+                              return
+                            }
+                            handlePartySymbolFileChange(index, file)
+                          }
+                        }}
+                        style={{ marginBottom: '0.5rem' }}
+                      />
+                      {candidate.partySymbol && (
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <img 
+                            src={candidate.partySymbol} 
+                            alt="Party Symbol Preview" 
+                            style={{ maxWidth: '100px', maxHeight: '100px', objectFit: 'contain', border: '1px solid var(--border-color)', borderRadius: '0.25rem', padding: '0.25rem' }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleCandidateChange(index, 'partySymbol', '')}
+                            className="btn btn-outline"
+                            style={{ marginLeft: '0.5rem', padding: '0.25rem 0.5rem', fontSize: '0.875rem' }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {candidate.partySymbol && candidate.partySymbolType === 'url' && (
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <img 
+                        src={candidate.partySymbol} 
+                        alt="Party Symbol Preview" 
+                        onError={(e) => { e.target.style.display = 'none' }}
+                        style={{ maxWidth: '100px', maxHeight: '100px', objectFit: 'contain', border: '1px solid var(--border-color)', borderRadius: '0.25rem', padding: '0.25rem' }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="input-group">
+                  <label>Party Description</label>
+                  <textarea
+                    value={candidate.partyDescription}
+                    onChange={(e) => handleCandidateChange(index, 'partyDescription', e.target.value)}
+                    rows={3}
+                    placeholder="Party history and description"
                   />
                 </div>
               </div>
             ))}
           </div>
         </div>
+
+        {/* Template Selection Modal */}
+        {showTemplateModal && (
+          <div style={styles.modalOverlay} onClick={() => setShowTemplateModal(false)}>
+            <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+              <div style={styles.modalHeader}>
+                <h2>Select Candidate Template</h2>
+                <button
+                  onClick={() => setShowTemplateModal(false)}
+                  className="btn btn-outline"
+                  style={styles.closeBtn}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              
+              {templateLoading ? (
+                <div className="loading-container" style={{ padding: '2rem' }}>
+                  <div className="spinner"></div>
+                </div>
+              ) : templates.length === 0 ? (
+                <div style={styles.emptyTemplates}>
+                  <UserCircle size={48} style={styles.emptyIcon} />
+                  <p>No templates available. Create templates from the dashboard.</p>
+                  <Link to="/admin/candidate-templates" className="btn btn-primary">
+                    Go to Templates
+                  </Link>
+                </div>
+              ) : (
+                <div style={styles.templatesList}>
+                  {templates.map((template) => (
+                    <div key={template.id} className="card" style={styles.templateCard}>
+                      <div style={styles.templateCardHeader}>
+                        <div style={styles.templateCardInfo}>
+                          {template.candidatePhoto && (
+                            <img 
+                              src={template.candidatePhoto} 
+                              alt={template.candidateName}
+                              style={styles.templateCardPhoto}
+                              onError={(e) => { e.target.style.display = 'none' }}
+                            />
+                          )}
+                          <div>
+                            <h4>{template.candidateName}</h4>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              {template.partySymbol && (
+                                <img 
+                                  src={template.partySymbol} 
+                                  alt="Party symbol"
+                                  style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+                                  onError={(e) => { e.target.style.display = 'none' }}
+                                />
+                              )}
+                              <span style={{ color: 'var(--text-secondary)' }}>{template.partyName}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => applyTemplate(template)}
+                          className="btn btn-primary"
+                          style={styles.applyBtn}
+                        >
+                          Apply
+                        </button>
+                      </div>
+                      {template.candidateDescription && (
+                        <p style={styles.templateCardDesc}>{template.candidateDescription}</p>
+                      )}
+                      {(template.state || template.district || template.lokSabhaConstituency || template.vidhanSabhaConstituency) && (
+                        <div style={styles.templateCardLocation}>
+                          {template.state && <span>State: {template.state}</span>}
+                          {template.district && <span>District: {template.district}</span>}
+                          {template.lokSabhaConstituency && <span>Lok Sabha: {template.lokSabhaConstituency}</span>}
+                          {template.vidhanSabhaConstituency && <span>Vidhan Sabha: {template.vidhanSabhaConstituency}</span>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Submit Button */}
         <div style={styles.submitSection}>
@@ -914,6 +1523,93 @@ const styles = {
     alignItems: 'center',
     marginTop: '0.75rem',
     gap: '0.5rem'
+  },
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+    padding: '2rem'
+  },
+  modalContent: {
+    backgroundColor: 'var(--bg-primary)',
+    borderRadius: '0.5rem',
+    maxWidth: '800px',
+    width: '100%',
+    maxHeight: '80vh',
+    overflow: 'auto',
+    boxShadow: '0 10px 40px rgba(0, 0, 0, 0.2)'
+  },
+  modalHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '1.5rem',
+    borderBottom: '1px solid var(--border-color)'
+  },
+  closeBtn: {
+    padding: '0.5rem'
+  },
+  templatesList: {
+    padding: '1.5rem',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1rem'
+  },
+  templateCard: {
+    padding: '1rem'
+  },
+  templateCardHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '0.5rem'
+  },
+  templateCardInfo: {
+    display: 'flex',
+    gap: '1rem',
+    alignItems: 'center',
+    flex: 1
+  },
+  templateCardPhoto: {
+    width: '50px',
+    height: '50px',
+    borderRadius: '0.5rem',
+    objectFit: 'cover'
+  },
+  templateCardDesc: {
+    color: 'var(--text-secondary)',
+    fontSize: '0.875rem',
+    marginBottom: '0.5rem'
+  },
+  templateCardLocation: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '0.75rem',
+    fontSize: '0.875rem',
+    color: 'var(--text-secondary)',
+    paddingTop: '0.5rem',
+    borderTop: '1px solid var(--border-color)'
+  },
+  applyBtn: {
+    padding: '0.5rem 1rem'
+  },
+  emptyTemplates: {
+    textAlign: 'center',
+    padding: '3rem',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '1rem'
+  },
+  emptyIcon: {
+    color: 'var(--text-secondary)'
   }
 }
 

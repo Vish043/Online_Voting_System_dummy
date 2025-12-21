@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { authAPI } from '../services/api'
-import { UserPlus, AlertCircle, CheckCircle } from 'lucide-react'
+import { UserPlus, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react'
 import { INDIAN_STATES_AND_UTS } from '../constants/indianStates'
-import { getDistrictsByState, getConstituenciesByDistrict, hasVidhanSabhaData } from '../constants/constituencies'
+import { getDistrictsByState, getConstituenciesByDistrict, hasVidhanSabhaData, getConstituenciesByState } from '../constants/constituencies'
+import SearchableSelect from '../components/SearchableSelect'
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -20,15 +21,32 @@ export default function Register() {
     state: '',
     district: '',
     ward: '',
-    constituency: ''
+    constituency: '',
+    lokSabhaConstituency: ''
   })
   const [availableDistricts, setAvailableDistricts] = useState([])
   const [availableConstituencies, setAvailableConstituencies] = useState([])
+  const [availableLokSabhaConstituencies, setAvailableLokSabhaConstituencies] = useState([])
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
   const { signup } = useAuth()
   const navigate = useNavigate()
+
+  // Update Lok Sabha constituencies when state changes
+  useEffect(() => {
+    if (formData.state) {
+      const lokSabhaConstituencies = getConstituenciesByState(formData.state)
+      setAvailableLokSabhaConstituencies(lokSabhaConstituencies)
+      // Reset Lok Sabha constituency when state changes
+      if (formData.lokSabhaConstituency && !lokSabhaConstituencies.includes(formData.lokSabhaConstituency)) {
+        setFormData(prev => ({ ...prev, lokSabhaConstituency: '' }))
+      }
+    } else {
+      setAvailableLokSabhaConstituencies([])
+      setFormData(prev => ({ ...prev, lokSabhaConstituency: '' }))
+    }
+  }, [formData.state])
 
   // Update districts and constituencies when state or district changes
   useEffect(() => {
@@ -96,8 +114,8 @@ export default function Register() {
         phoneNumber: formData.phoneNumber,
         state: formData.state,
         district: formData.district,
-        ward: formData.ward,
-        constituency: formData.constituency
+        constituency: formData.constituency,
+        lokSabhaConstituency: formData.lokSabhaConstituency
       })
 
       setSuccess('Registration successful! Your account is pending verification.')
@@ -114,6 +132,10 @@ export default function Register() {
 
   return (
     <div style={styles.container}>
+      <button onClick={() => navigate('/')} className="btn btn-outline" style={styles.backBtn}>
+        <ArrowLeft size={18} />
+        Back to Home
+      </button>
       <div className="card" style={styles.card}>
         <div style={styles.header}>
           <UserPlus size={40} style={styles.icon} />
@@ -146,7 +168,7 @@ export default function Register() {
                 value={formData.firstName}
                 onChange={handleChange}
                 required
-                placeholder="John"
+                placeholder="Rahul"
               />
             </div>
 
@@ -159,7 +181,7 @@ export default function Register() {
                 value={formData.lastName}
                 onChange={handleChange}
                 required
-                placeholder="Doe"
+                placeholder="Sharma"
               />
             </div>
           </div>
@@ -173,7 +195,7 @@ export default function Register() {
               value={formData.email}
               onChange={handleChange}
               required
-              placeholder="john.doe@example.com"
+              placeholder="rahul.sharma@example.com"
             />
           </div>
 
@@ -229,7 +251,7 @@ export default function Register() {
                 value={formData.nationalId}
                 onChange={handleChange}
                 required
-                placeholder="123456789"
+                placeholder="ABCDE1234F"
               />
             </div>
           </div>
@@ -242,7 +264,7 @@ export default function Register() {
               name="phoneNumber"
               value={formData.phoneNumber}
               onChange={handleChange}
-              placeholder="+1 234 567 8900"
+              placeholder="+91 98765 43210"
             />
           </div>
 
@@ -254,7 +276,7 @@ export default function Register() {
               value={formData.address}
               onChange={handleChange}
               rows={3}
-              placeholder="123 Main St, City, State, ZIP"
+              placeholder="House No. 123, Sector 5, New Delhi - 110001"
             />
           </div>
 
@@ -265,41 +287,63 @@ export default function Register() {
 
           <div className="input-group">
             <label htmlFor="state">State / Union Territory *</label>
-            <select
+            <SearchableSelect
               id="state"
               name="state"
               value={formData.state}
               onChange={handleChange}
+              options={INDIAN_STATES_AND_UTS.map((state) => 
+                `${state.name}${state.type === 'ut' ? ' (UT)' : ''} - ${state.seats} Lok Sabha seats`
+              )}
+              getOptionValue={(option) => {
+                // Extract state name from formatted string
+                const match = option.match(/^([^(]+?)(?:\s*\(UT\))?\s*-/)
+                return match ? match[1].trim() : option
+              }}
+              placeholder="Select your state or union territory..."
               required
-              style={styles.stateSelect}
-            >
-              <option value="">Select your state or union territory...</option>
-              {INDIAN_STATES_AND_UTS.map((state) => (
-                <option key={state.name} value={state.name}>
-                  {state.name} {state.type === 'ut' ? '(UT)' : ''} - {state.seats} Lok Sabha seats
-                </option>
-              ))}
-            </select>
+            />
           </div>
+
+          {formData.state && (
+            <div className="input-group">
+              <label htmlFor="lokSabhaConstituency">Lok Sabha Constituency *</label>
+              {availableLokSabhaConstituencies.length > 0 ? (
+                <SearchableSelect
+                  id="lokSabhaConstituency"
+                  name="lokSabhaConstituency"
+                  value={formData.lokSabhaConstituency}
+                  onChange={handleChange}
+                  options={availableLokSabhaConstituencies}
+                  placeholder="Select your Lok Sabha constituency..."
+                  required
+                />
+              ) : (
+                <input
+                  type="text"
+                  id="lokSabhaConstituency"
+                  name="lokSabhaConstituency"
+                  value={formData.lokSabhaConstituency}
+                  onChange={handleChange}
+                  required
+                  placeholder="Enter your Lok Sabha constituency"
+                />
+              )}
+            </div>
+          )}
 
           <div className="input-group">
             <label htmlFor="district">District *</label>
             {formData.state && hasVidhanSabhaData(formData.state) && availableDistricts.length > 0 ? (
-              <select
+              <SearchableSelect
                 id="district"
                 name="district"
                 value={formData.district}
                 onChange={handleChange}
+                options={availableDistricts}
+                placeholder="Select your district..."
                 required
-                style={styles.stateSelect}
-              >
-                <option value="">Select your district...</option>
-                {availableDistricts.map((district) => (
-                  <option key={district} value={district}>
-                    {district}
-                  </option>
-                ))}
-              </select>
+              />
             ) : (
               <input
                 type="text"
@@ -316,36 +360,17 @@ export default function Register() {
           {formData.state && formData.district && hasVidhanSabhaData(formData.state) && availableConstituencies.length > 0 && (
             <div className="input-group">
               <label htmlFor="constituency">Constituency (Vidhan Sabha) *</label>
-              <select
+              <SearchableSelect
                 id="constituency"
                 name="constituency"
                 value={formData.constituency}
                 onChange={handleChange}
+                options={availableConstituencies}
+                placeholder="Select your constituency..."
                 required
-                style={styles.stateSelect}
-              >
-                <option value="">Select your constituency...</option>
-                {availableConstituencies.map((constituency) => (
-                  <option key={constituency} value={constituency}>
-                    {constituency}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
           )}
-
-          <div className="input-group">
-            <label htmlFor="ward">Ward/Locality/Panchayat *</label>
-            <input
-              type="text"
-              id="ward"
-              name="ward"
-              value={formData.ward}
-              onChange={handleChange}
-              required
-              placeholder="e.g., Ward 1, Panchayat Name"
-            />
-          </div>
 
           <button 
             type="submit" 
@@ -374,9 +399,19 @@ const styles = {
   container: {
     minHeight: 'calc(100vh - 100px)',
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '2rem 1rem'
+    padding: '2rem 1rem',
+    position: 'relative'
+  },
+  backBtn: {
+    position: 'absolute',
+    top: '2rem',
+    left: '2rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem'
   },
   card: {
     maxWidth: '600px',

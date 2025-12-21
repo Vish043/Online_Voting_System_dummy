@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LogIn, AlertCircle } from 'lucide-react'
+import { LogIn, AlertCircle, ArrowLeft } from 'lucide-react'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -29,6 +29,10 @@ export default function Login() {
 
   return (
     <div style={styles.container}>
+      <button onClick={() => navigate('/')} className="btn btn-outline" style={styles.backBtn}>
+        <ArrowLeft size={18} />
+        Back to Home
+      </button>
       <div className="card" style={styles.card}>
         <div style={styles.header}>
           <LogIn size={40} style={styles.icon} />
@@ -52,7 +56,7 @@ export default function Login() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              placeholder="your.email@example.com"
+              placeholder="rahul.sharma@example.com"
             />
           </div>
 
@@ -102,9 +106,19 @@ const styles = {
   container: {
     minHeight: 'calc(100vh - 100px)',
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '2rem 1rem'
+    padding: '2rem 1rem',
+    position: 'relative'
+  },
+  backBtn: {
+    position: 'absolute',
+    top: '2rem',
+    left: '2rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem'
   },
   card: {
     maxWidth: '450px',
