@@ -40,7 +40,9 @@ const collections = {
   VOTES: 'votes',
   CANDIDATES: 'candidates',
   AUDIT_LOGS: 'auditLogs',
-  VOTER_REGISTRY: 'voterRegistry'
+  VOTER_REGISTRY: 'voterRegistry',
+  CANDIDATE_TEMPLATES: 'candidateTemplates',
+  PARTY_TEMPLATES: 'partyTemplates'
 };
 
 module.exports = {

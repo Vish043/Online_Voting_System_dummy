@@ -52,12 +52,13 @@ router.post('/register', verifyToken, async (req, res) => {
       state,
       district,
       ward,
-      constituency
+      constituency,
+      lokSabhaConstituency
     } = req.body;
 
     // Validate required fields
-    if (!firstName || !lastName || !dateOfBirth || !nationalId || !state || !district || !ward) {
-      return res.status(400).json({ error: 'Missing required fields. State, District, and Ward are required.' });
+    if (!firstName || !lastName || !dateOfBirth || !nationalId || !state || !district) {
+      return res.status(400).json({ error: 'Missing required fields. State and District are required.' });
     }
 
     // Check if user already registered
@@ -87,8 +88,9 @@ router.post('/register', verifyToken, async (req, res) => {
       phoneNumber: phoneNumber || '',
       state: state.trim(),
       district: district.trim(),
-      ward: ward.trim(),
+      ward: ward ? ward.trim() : '',
       constituency: constituency ? constituency.trim() : '',
+      lokSabhaConstituency: lokSabhaConstituency ? lokSabhaConstituency.trim() : '',
       isVerified: false, // Requires admin verification
       isEligible: false,
       registeredAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -196,7 +198,7 @@ router.put('/profile', verifyToken, async (req, res) => {
       console.warn('Admin check failed, continuing with profile update:', adminCheckError.message);
     }
     
-    const { address, phoneNumber, state, district, ward, constituency } = req.body;
+    const { address, phoneNumber, state, district, ward, constituency, lokSabhaConstituency } = req.body;
 
     const updateData = {
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -208,6 +210,7 @@ router.put('/profile', verifyToken, async (req, res) => {
     if (district) updateData.district = district.trim();
     if (ward) updateData.ward = ward.trim();
     if (constituency !== undefined) updateData.constituency = constituency ? constituency.trim() : '';
+    if (lokSabhaConstituency !== undefined) updateData.lokSabhaConstituency = lokSabhaConstituency ? lokSabhaConstituency.trim() : '';
 
     await db.collection(collections.VOTER_REGISTRY).doc(uid).update(updateData);
 

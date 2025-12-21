@@ -249,6 +249,7 @@ router.post('/elections/:electionId/candidates', async (req, res) => {
       party,
       biography,
       photoURL,
+      partySymbol,
       position,
       positionTitle
     } = req.body;
@@ -266,6 +267,19 @@ router.post('/elections/:electionId/candidates', async (req, res) => {
 
     const electionData = electionDoc.data();
     const electionType = electionData.type || 'general';
+    
+    // Check if a candidate from the same party already exists in this election
+    const existingCandidatesSnapshot = await db.collection(collections.CANDIDATES)
+      .where('electionId', '==', electionId)
+      .where('party', '==', party)
+      .get();
+
+    if (!existingCandidatesSnapshot.empty) {
+      const existingCandidate = existingCandidatesSnapshot.docs[0].data();
+      return res.status(400).json({ 
+        error: `A candidate from "${party}" (${existingCandidate.name}) already exists in this election. Only one candidate per party is allowed per seat/location.` 
+      });
+    }
     
     // Determine position title based on election type if not provided
     let finalPositionTitle = positionTitle;
@@ -287,6 +301,7 @@ router.post('/elections/:electionId/candidates', async (req, res) => {
       party,
       biography: biography || '',
       photoURL: photoURL || '',
+      partySymbol: partySymbol || '',
       position: position || 0,
       positionTitle: finalPositionTitle, // 'MP', 'MLA', 'Councillor', or 'Sarpanch'
       voteCount: 0,
@@ -447,6 +462,44 @@ router.get('/statistics', async (req, res) => {
     const votesSnapshot = await db.collection(collections.VOTES).count().get();
     const totalVotes = votesSnapshot.data().count;
 
+    // Count parties by level
+    const partyTemplatesSnapshot = await db.collection(collections.PARTY_TEMPLATES).get();
+    const partiesByLevel = {
+      national: 0,
+      state: 0,
+      local: 0,
+      total: partyTemplatesSnapshot.size
+    };
+    partyTemplatesSnapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.partyType === 'National Party') {
+        partiesByLevel.national++;
+      } else if (data.partyType === 'State Party') {
+        partiesByLevel.state++;
+      } else if (data.partyType === 'Local Party') {
+        partiesByLevel.local++;
+      }
+    });
+
+    // Count candidates by type
+    const candidateTemplatesSnapshot = await db.collection(collections.CANDIDATE_TEMPLATES).get();
+    const candidatesByType = {
+      lokSabha: 0,
+      vidhanSabha: 0,
+      zillaParishad: 0,
+      total: candidateTemplatesSnapshot.size
+    };
+    candidateTemplatesSnapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.electionType === 'Lok Sabha') {
+        candidatesByType.lokSabha++;
+      } else if (data.electionType === 'Vidhan Sabha') {
+        candidatesByType.vidhanSabha++;
+      } else if (data.electionType === 'Zilla Parishad') {
+        candidatesByType.zillaParishad++;
+      }
+    });
+
     res.json({
       statistics: {
         totalVoters,
@@ -454,7 +507,9 @@ router.get('/statistics', async (req, res) => {
         pendingVerification: totalVoters - verifiedVoters,
         totalElections,
         activeElections,
-        totalVotes
+        totalVotes,
+        partiesByLevel,
+        candidatesByType
       }
     });
   } catch (error) {
@@ -487,6 +542,320 @@ router.post('/set-admin', async (req, res) => {
   } catch (error) {
     console.error('Set admin error:', error);
     res.status(500).json({ error: 'Failed to set admin role' });
+  }
+});
+
+// Party Templates Management
+
+// Get all party templates
+router.get('/party-templates', async (req, res) => {
+  try {
+    const templatesSnapshot = await db.collection(collections.PARTY_TEMPLATES)
+      .orderBy('createdAt', 'desc')
+      .get();
+
+    const templates = [];
+    templatesSnapshot.forEach(doc => {
+      const data = doc.data();
+      templates.push({
+        id: doc.id,
+        ...data,
+        createdAt: serializeTimestamp(data.createdAt),
+        updatedAt: serializeTimestamp(data.updatedAt)
+      });
+    });
+
+    res.json({ templates });
+  } catch (error) {
+    console.error('Get party templates error:', error);
+    res.status(500).json({ error: 'Failed to fetch party templates' });
+  }
+});
+
+// Create party template
+router.post('/party-templates', async (req, res) => {
+  try {
+    const {
+      partyName,
+      partyType,
+      partySymbol,
+      partyHistory
+    } = req.body;
+
+    if (!partyName || !partyType) {
+      return res.status(400).json({ error: 'Party name and party type are required' });
+    }
+
+    const templateData = {
+      partyName,
+      partyType,
+      partySymbol: partySymbol || '',
+      partyHistory: partyHistory || '',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdBy: req.user.uid
+    };
+
+    const templateRef = await db.collection(collections.PARTY_TEMPLATES).add(templateData);
+
+    // Log audit
+    await db.collection(collections.AUDIT_LOGS).add({
+      action: 'PARTY_TEMPLATE_CREATED',
+      adminId: req.user.uid,
+      templateId: templateRef.id,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      details: { partyName }
+    });
+
+    res.status(201).json({
+      message: 'Party template created successfully',
+      templateId: templateRef.id,
+      template: { id: templateRef.id, ...templateData }
+    });
+  } catch (error) {
+    console.error('Create party template error:', error);
+    res.status(500).json({ error: 'Failed to create party template' });
+  }
+});
+
+// Update party template
+router.put('/party-templates/:templateId', async (req, res) => {
+  try {
+    const { templateId } = req.params;
+    const {
+      partyName,
+      partyType,
+      partySymbol,
+      partyHistory
+    } = req.body;
+
+    const templateDoc = await db.collection(collections.PARTY_TEMPLATES).doc(templateId).get();
+    
+    if (!templateDoc.exists) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    const updateData = {
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    if (partyName) updateData.partyName = partyName;
+    if (partyType !== undefined) updateData.partyType = partyType;
+    if (partySymbol !== undefined) updateData.partySymbol = partySymbol;
+    if (partyHistory !== undefined) updateData.partyHistory = partyHistory;
+
+    await db.collection(collections.PARTY_TEMPLATES).doc(templateId).update(updateData);
+
+    // Log audit
+    await db.collection(collections.AUDIT_LOGS).add({
+      action: 'PARTY_TEMPLATE_UPDATED',
+      adminId: req.user.uid,
+      templateId,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      details: { partyName }
+    });
+
+    res.json({ message: 'Party template updated successfully' });
+  } catch (error) {
+    console.error('Update party template error:', error);
+    res.status(500).json({ error: 'Failed to update party template' });
+  }
+});
+
+// Delete party template
+router.delete('/party-templates/:templateId', async (req, res) => {
+  try {
+    const { templateId } = req.params;
+
+    const templateDoc = await db.collection(collections.PARTY_TEMPLATES).doc(templateId).get();
+    
+    if (!templateDoc.exists) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    await db.collection(collections.PARTY_TEMPLATES).doc(templateId).delete();
+
+    // Log audit
+    await db.collection(collections.AUDIT_LOGS).add({
+      action: 'PARTY_TEMPLATE_DELETED',
+      adminId: req.user.uid,
+      templateId,
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    res.json({ message: 'Party template deleted successfully' });
+  } catch (error) {
+    console.error('Delete party template error:', error);
+    res.status(500).json({ error: 'Failed to delete party template' });
+  }
+});
+
+// Candidate Templates Management
+
+// Get all candidate templates
+router.get('/candidate-templates', async (req, res) => {
+  try {
+    const templatesSnapshot = await db.collection(collections.CANDIDATE_TEMPLATES)
+      .orderBy('createdAt', 'desc')
+      .get();
+
+    const templates = [];
+    templatesSnapshot.forEach(doc => {
+      const data = doc.data();
+      templates.push({
+        id: doc.id,
+        ...data,
+        createdAt: serializeTimestamp(data.createdAt),
+        updatedAt: serializeTimestamp(data.updatedAt)
+      });
+    });
+
+    res.json({ templates });
+  } catch (error) {
+    console.error('Get templates error:', error);
+    res.status(500).json({ error: 'Failed to fetch templates' });
+  }
+});
+
+// Create candidate template
+router.post('/candidate-templates', async (req, res) => {
+  try {
+    const {
+      candidateName,
+      partyName,
+      partySymbol,
+      candidateDescription,
+      candidatePhoto,
+      electionType,
+      state,
+      lokSabhaConstituency,
+      vidhanSabhaConstituency,
+      district
+    } = req.body;
+
+    if (!candidateName || !partyName || !electionType) {
+      return res.status(400).json({ error: 'Candidate name, party name, and election type are required' });
+    }
+
+    const templateData = {
+      candidateName,
+      partyName,
+      partySymbol: partySymbol || '',
+      candidateDescription: candidateDescription || '',
+      candidatePhoto: candidatePhoto || '',
+      electionType,
+      state: state || '',
+      lokSabhaConstituency: lokSabhaConstituency || '',
+      vidhanSabhaConstituency: vidhanSabhaConstituency || '',
+      district: district || '',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdBy: req.user.uid
+    };
+
+    const templateRef = await db.collection(collections.CANDIDATE_TEMPLATES).add(templateData);
+
+    // Log audit
+    await db.collection(collections.AUDIT_LOGS).add({
+      action: 'CANDIDATE_TEMPLATE_CREATED',
+      adminId: req.user.uid,
+      templateId: templateRef.id,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      details: { candidateName, partyName }
+    });
+
+    res.status(201).json({
+      message: 'Template created successfully',
+      templateId: templateRef.id,
+      template: { id: templateRef.id, ...templateData }
+    });
+  } catch (error) {
+    console.error('Create template error:', error);
+    res.status(500).json({ error: 'Failed to create template' });
+  }
+});
+
+// Update candidate template
+router.put('/candidate-templates/:templateId', async (req, res) => {
+  try {
+    const { templateId } = req.params;
+    const {
+      candidateName,
+      partyName,
+      partySymbol,
+      candidateDescription,
+      candidatePhoto,
+      electionType,
+      state,
+      lokSabhaConstituency,
+      vidhanSabhaConstituency,
+      district
+    } = req.body;
+
+    const templateDoc = await db.collection(collections.CANDIDATE_TEMPLATES).doc(templateId).get();
+    
+    if (!templateDoc.exists) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    const updateData = {
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    if (candidateName) updateData.candidateName = candidateName;
+    if (partyName) updateData.partyName = partyName;
+    if (partySymbol !== undefined) updateData.partySymbol = partySymbol;
+    if (candidateDescription !== undefined) updateData.candidateDescription = candidateDescription;
+    if (candidatePhoto !== undefined) updateData.candidatePhoto = candidatePhoto;
+    if (electionType !== undefined) updateData.electionType = electionType;
+    if (state !== undefined) updateData.state = state;
+    if (lokSabhaConstituency !== undefined) updateData.lokSabhaConstituency = lokSabhaConstituency;
+    if (vidhanSabhaConstituency !== undefined) updateData.vidhanSabhaConstituency = vidhanSabhaConstituency;
+    if (district !== undefined) updateData.district = district;
+
+    await db.collection(collections.CANDIDATE_TEMPLATES).doc(templateId).update(updateData);
+
+    // Log audit
+    await db.collection(collections.AUDIT_LOGS).add({
+      action: 'CANDIDATE_TEMPLATE_UPDATED',
+      adminId: req.user.uid,
+      templateId,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      details: { candidateName, partyName }
+    });
+
+    res.json({ message: 'Template updated successfully' });
+  } catch (error) {
+    console.error('Update template error:', error);
+    res.status(500).json({ error: 'Failed to update template' });
+  }
+});
+
+// Delete candidate template
+router.delete('/candidate-templates/:templateId', async (req, res) => {
+  try {
+    const { templateId } = req.params;
+
+    const templateDoc = await db.collection(collections.CANDIDATE_TEMPLATES).doc(templateId).get();
+    
+    if (!templateDoc.exists) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    await db.collection(collections.CANDIDATE_TEMPLATES).doc(templateId).delete();
+
+    // Log audit
+    await db.collection(collections.AUDIT_LOGS).add({
+      action: 'CANDIDATE_TEMPLATE_DELETED',
+      adminId: req.user.uid,
+      templateId,
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    res.json({ message: 'Template deleted successfully' });
+  } catch (error) {
+    console.error('Delete template error:', error);
+    res.status(500).json({ error: 'Failed to delete template' });
   }
 });
 
