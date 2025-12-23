@@ -73,6 +73,7 @@ export const electionsAPI = {
   getActive: () => api.get('/elections'),
   getUpcoming: () => api.get('/elections/upcoming'),
   getCompleted: () => api.get('/elections/completed'),
+  getAll: () => api.get('/elections/all'), // Get all elections (for "Other Elections" view)
   getById: (id) => api.get(`/elections/${id}`),
   checkVoted: (id) => api.get(`/elections/${id}/voted`),
   getResults: (id) => api.get(`/elections/${id}/results`)
@@ -89,6 +90,7 @@ export const votesAPI = {
 export const adminAPI = {
   getVoters: (status) => api.get(`/admin/voters?status=${status || 'all'}`),
   verifyVoter: (voterId, data) => api.post(`/admin/voters/${voterId}/verify`, data),
+  bulkVerifyVoters: (voterIds, data) => api.post('/admin/voters/bulk-verify', { voterIds, ...data }),
   createElection: (data) => api.post('/admin/elections', data),
   updateElectionStatus: (electionId, status) => 
     api.patch(`/admin/elections/${electionId}/status`, { status }),

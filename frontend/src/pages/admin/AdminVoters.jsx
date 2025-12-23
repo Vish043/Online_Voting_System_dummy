@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { adminAPI } from '../../services/api'
-import { Search, CheckCircle, XCircle, Clock, AlertCircle, ArrowLeft } from 'lucide-react'
+import { Search, CheckCircle, XCircle, Clock, AlertCircle, ArrowLeft, CheckSquare, Square } from 'lucide-react'
 
 // Helper function to convert Firestore Timestamp to Date
 function convertTimestampToDate(timestamp) {
@@ -32,6 +32,8 @@ export default function AdminVoters() {
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState({ type: '', text: '' })
+  const [selectedVoters, setSelectedVoters] = useState(new Set())
+  const [bulkLoading, setBulkLoading] = useState(false)
 
   useEffect(() => {
     fetchVoters()
@@ -61,6 +63,52 @@ export default function AdminVoters() {
     } catch (error) {
       console.error('Verify voter error:', error)
       setMessage({ type: 'error', text: 'Failed to update voter status' })
+    }
+  }
+
+  function handleSelectVoter(voterId) {
+    const newSelected = new Set(selectedVoters)
+    if (newSelected.has(voterId)) {
+      newSelected.delete(voterId)
+    } else {
+      newSelected.add(voterId)
+    }
+    setSelectedVoters(newSelected)
+  }
+
+  function handleSelectAll() {
+    const pendingVoters = filteredVoters.filter(v => !v.isVerified)
+    if (selectedVoters.size === pendingVoters.length) {
+      setSelectedVoters(new Set())
+    } else {
+      setSelectedVoters(new Set(pendingVoters.map(v => v.id)))
+    }
+  }
+
+  async function handleBulkVerify(isVerified, isEligible) {
+    if (selectedVoters.size === 0) {
+      setMessage({ type: 'error', text: 'Please select at least one voter' })
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000)
+      return
+    }
+
+    try {
+      setBulkLoading(true)
+      const voterIds = Array.from(selectedVoters)
+      await adminAPI.bulkVerifyVoters(voterIds, { isVerified, isEligible })
+      setMessage({ 
+        type: 'success', 
+        text: `Successfully ${isVerified ? 'approved' : 'rejected'} ${voterIds.length} voter(s)` 
+      })
+      setSelectedVoters(new Set())
+      await fetchVoters()
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000)
+    } catch (error) {
+      console.error('Bulk verify error:', error)
+      setMessage({ type: 'error', text: error.response?.data?.error || 'Failed to update voters' })
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000)
+    } finally {
+      setBulkLoading(false)
     }
   }
 
@@ -94,21 +142,30 @@ export default function AdminVoters() {
         <div style={styles.filters}>
           <button
             className={`btn ${filter === 'pending' ? 'btn-primary' : 'btn-outline'}`}
-            onClick={() => setFilter('pending')}
+            onClick={() => {
+              setFilter('pending')
+              setSelectedVoters(new Set())
+            }}
           >
             <Clock size={18} />
             Pending
           </button>
           <button
             className={`btn ${filter === 'verified' ? 'btn-primary' : 'btn-outline'}`}
-            onClick={() => setFilter('verified')}
+            onClick={() => {
+              setFilter('verified')
+              setSelectedVoters(new Set())
+            }}
           >
             <CheckCircle size={18} />
             Verified
           </button>
           <button
             className={`btn ${filter === 'all' ? 'btn-primary' : 'btn-outline'}`}
-            onClick={() => setFilter('all')}
+            onClick={() => {
+              setFilter('all')
+              setSelectedVoters(new Set())
+            }}
           >
             All Voters
           </button>
@@ -125,6 +182,56 @@ export default function AdminVoters() {
           />
         </div>
       </div>
+
+      {/* Bulk Actions */}
+      {filter === 'pending' && filteredVoters.filter(v => !v.isVerified).length > 0 && (
+        <div className="card" style={styles.bulkActions}>
+          <div style={styles.bulkActionsLeft}>
+            <button
+              className="btn btn-outline"
+              onClick={handleSelectAll}
+              style={styles.selectAllBtn}
+            >
+              {selectedVoters.size === filteredVoters.filter(v => !v.isVerified).length ? (
+                <>
+                  <CheckSquare size={18} />
+                  Deselect All
+                </>
+              ) : (
+                <>
+                  <Square size={18} />
+                  Select All
+                </>
+              )}
+            </button>
+            <span style={styles.selectedCount}>
+              {selectedVoters.size > 0 ? `${selectedVoters.size} selected` : 'No voters selected'}
+            </span>
+          </div>
+          {selectedVoters.size > 0 && (
+            <div style={styles.bulkActionsRight}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleBulkVerify(true, true)}
+                disabled={bulkLoading}
+                style={styles.bulkBtn}
+              >
+                <CheckCircle size={18} />
+                Approve Selected ({selectedVoters.size})
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={() => handleBulkVerify(false, false)}
+                disabled={bulkLoading}
+                style={styles.bulkBtn}
+              >
+                <XCircle size={18} />
+                Reject Selected ({selectedVoters.size})
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Voters Table */}
       {loading ? (
@@ -143,6 +250,16 @@ export default function AdminVoters() {
             <table>
               <thead>
                 <tr>
+                  {filter === 'pending' && (
+                    <th style={{ width: '40px' }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedVoters.size === filteredVoters.filter(v => !v.isVerified).length && filteredVoters.filter(v => !v.isVerified).length > 0}
+                        onChange={handleSelectAll}
+                        style={styles.checkbox}
+                      />
+                    </th>
+                  )}
                   <th>Name</th>
                   <th>Email</th>
                   <th>Date of Birth</th>
@@ -153,7 +270,19 @@ export default function AdminVoters() {
               </thead>
               <tbody>
                 {filteredVoters.map((voter) => (
-                  <tr key={voter.id}>
+                  <tr key={voter.id} style={selectedVoters.has(voter.id) ? styles.selectedRow : {}}>
+                    {filter === 'pending' && (
+                      <td>
+                        {!voter.isVerified ? (
+                          <input
+                            type="checkbox"
+                            checked={selectedVoters.has(voter.id)}
+                            onChange={() => handleSelectVoter(voter.id)}
+                            style={styles.checkbox}
+                          />
+                        ) : null}
+                      </td>
+                    )}
                     <td>
                       <strong>{voter.firstName} {voter.lastName}</strong>
                     </td>
@@ -271,6 +400,47 @@ const styles = {
   approvedText: {
     color: 'var(--secondary-color)',
     fontWeight: 600
+  },
+  bulkActions: {
+    marginBottom: '1rem',
+    padding: '1rem',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '1rem'
+  },
+  bulkActionsLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '1rem'
+  },
+  bulkActionsRight: {
+    display: 'flex',
+    gap: '0.5rem',
+    flexWrap: 'wrap'
+  },
+  selectAllBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem'
+  },
+  selectedCount: {
+    color: 'var(--text-secondary)',
+    fontSize: '0.875rem'
+  },
+  bulkBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem'
+  },
+  checkbox: {
+    width: '18px',
+    height: '18px',
+    cursor: 'pointer'
+  },
+  selectedRow: {
+    backgroundColor: 'var(--bg-secondary)'
   }
 }
 

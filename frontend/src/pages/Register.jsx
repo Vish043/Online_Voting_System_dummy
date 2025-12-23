@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { authAPI } from '../services/api'
+import { auth } from '../config/firebase'
 import { UserPlus, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react'
 import { INDIAN_STATES_AND_UTS } from '../constants/indianStates'
 import { getDistrictsByState, getConstituenciesByDistrict, hasVidhanSabhaData, getConstituenciesByState } from '../constants/constituencies'
@@ -30,7 +31,7 @@ export default function Register() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
-  const { signup } = useAuth()
+  const { signup, deleteUserAccount, logout } = useAuth()
   const navigate = useNavigate()
 
   // Update Lok Sabha constituencies when state changes
@@ -95,6 +96,31 @@ export default function Register() {
       return setError('Password must be at least 6 characters')
     }
 
+    // Validate address is provided and not empty
+    if (!formData.address || !formData.address.trim()) {
+      return setError('Address is required')
+    }
+
+    // Validate age (must be 18 or above)
+    if (formData.dateOfBirth) {
+      const birthDate = new Date(formData.dateOfBirth)
+      const today = new Date()
+      const age = today.getFullYear() - birthDate.getFullYear()
+      const monthDiff = today.getMonth() - birthDate.getMonth()
+      const dayDiff = today.getDate() - birthDate.getDate()
+      
+      // Calculate exact age considering month and day
+      let exactAge = age
+      if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+        exactAge--
+      }
+      
+      if (exactAge < 18) {
+        return setError('You must be at least 18 years old to register')
+      }
+    }
+
+    let userCredential = null
     try {
       setError('')
       setSuccess('')
@@ -102,29 +128,51 @@ export default function Register() {
 
       // Create Firebase auth account
       const displayName = `${formData.firstName} ${formData.lastName}`
-      await signup(formData.email, formData.password, displayName)
+      userCredential = await signup(formData.email, formData.password, displayName)
 
       // Register voter in backend
-      await authAPI.register({
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        dateOfBirth: formData.dateOfBirth,
-        nationalId: formData.nationalId,
-        address: formData.address,
-        phoneNumber: formData.phoneNumber,
-        state: formData.state,
-        district: formData.district,
-        constituency: formData.constituency,
-        lokSabhaConstituency: formData.lokSabhaConstituency
-      })
+      try {
+        await authAPI.register({
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          dateOfBirth: formData.dateOfBirth,
+          nationalId: formData.nationalId,
+          address: formData.address,
+          phoneNumber: formData.phoneNumber,
+          state: formData.state,
+          district: formData.district,
+          constituency: formData.constituency,
+          lokSabhaConstituency: formData.lokSabhaConstituency
+        })
 
-      setSuccess('Registration successful! Your account is pending verification.')
-      setTimeout(() => {
-        navigate('/dashboard')
-      }, 2000)
+        setSuccess('Registration successful! Your account is pending verification.')
+        setTimeout(() => {
+          navigate('/dashboard')
+        }, 2000)
+      } catch (backendError) {
+        // If backend registration fails, delete the Firebase Auth account
+        console.error('Backend registration error:', backendError)
+        // Use currentUser from auth since deleteUser requires the currently authenticated user
+        const currentUser = auth.currentUser || (userCredential && userCredential.user)
+        if (currentUser) {
+          try {
+            await deleteUserAccount(currentUser)
+            console.log('Firebase Auth account deleted due to registration failure')
+          } catch (deleteError) {
+            console.error('Error deleting Firebase Auth account:', deleteError)
+            // If deletion fails, at least sign out the user
+            try {
+              await logout()
+            } catch (logoutError) {
+              console.error('Error signing out:', logoutError)
+            }
+          }
+        }
+        throw backendError
+      }
     } catch (error) {
       console.error('Registration error:', error)
-      setError(error.message || 'Failed to create account')
+      setError(error.response?.data?.error || error.message || 'Failed to create account')
     } finally {
       setLoading(false)
     }
@@ -269,7 +317,7 @@ export default function Register() {
           </div>
 
           <div className="input-group">
-            <label htmlFor="address">Address</label>
+            <label htmlFor="address">Address *</label>
             <textarea
               id="address"
               name="address"
@@ -277,6 +325,7 @@ export default function Register() {
               onChange={handleChange}
               rows={3}
               placeholder="House No. 123, Sector 5, New Delhi - 110001"
+              required
             />
           </div>
 

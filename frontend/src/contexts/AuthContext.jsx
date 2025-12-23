@@ -5,7 +5,8 @@ import {
   signOut,
   onAuthStateChanged,
   sendPasswordResetEmail,
-  updateProfile
+  updateProfile,
+  deleteUser
 } from 'firebase/auth'
 import { auth } from '../config/firebase'
 
@@ -50,6 +51,14 @@ export function AuthProvider({ children }) {
     return updateProfile(auth.currentUser, data)
   }
 
+  // Delete user account
+  async function deleteUserAccount(user) {
+    if (user) {
+      return await deleteUser(user)
+    }
+    throw new Error('No user to delete')
+  }
+
   // Get ID token
   async function getIdToken() {
     if (currentUser) {
@@ -91,6 +100,7 @@ export function AuthProvider({ children }) {
     logout,
     resetPassword,
     updateUserProfile,
+    deleteUserAccount,
     getIdToken,
     loading,
     error
