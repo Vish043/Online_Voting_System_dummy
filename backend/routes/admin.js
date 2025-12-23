@@ -136,6 +136,54 @@ router.post('/voters/:voterId/verify', async (req, res) => {
   }
 });
 
+// Bulk Verify Voters
+router.post('/voters/bulk-verify', async (req, res) => {
+  try {
+    const { voterIds, isVerified, isEligible } = req.body;
+
+    if (!Array.isArray(voterIds) || voterIds.length === 0) {
+      return res.status(400).json({ error: 'voterIds must be a non-empty array' });
+    }
+
+    const batch = db.batch();
+    const timestamp = admin.firestore.FieldValue.serverTimestamp();
+    const adminId = req.user.uid;
+
+    // Update all voters in batch
+    voterIds.forEach(voterId => {
+      const voterRef = db.collection(collections.VOTER_REGISTRY).doc(voterId);
+      batch.update(voterRef, {
+        isVerified: isVerified !== undefined ? isVerified : true,
+        isEligible: isEligible !== undefined ? isEligible : true,
+        verifiedAt: timestamp,
+        verifiedBy: adminId
+      });
+    });
+
+    // Commit batch update
+    await batch.commit();
+
+    // Log audit for bulk action
+    await db.collection(collections.AUDIT_LOGS).add({
+      action: 'BULK_VOTER_VERIFIED',
+      adminId: adminId,
+      voterIds: voterIds,
+      count: voterIds.length,
+      isVerified,
+      isEligible,
+      timestamp: timestamp
+    });
+
+    res.json({ 
+      message: `Successfully ${isVerified ? 'verified' : 'rejected'} ${voterIds.length} voter(s)`,
+      count: voterIds.length
+    });
+  } catch (error) {
+    console.error('Bulk voter verification error:', error);
+    res.status(500).json({ error: 'Failed to verify voters' });
+  }
+});
+
 // Create Election
 router.post('/elections', async (req, res) => {
   try {

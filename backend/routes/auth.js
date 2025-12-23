@@ -57,8 +57,8 @@ router.post('/register', verifyToken, async (req, res) => {
     } = req.body;
 
     // Validate required fields
-    if (!firstName || !lastName || !dateOfBirth || !nationalId || !state || !district) {
-      return res.status(400).json({ error: 'Missing required fields. State and District are required.' });
+    if (!firstName || !lastName || !dateOfBirth || !nationalId || !address || !address.trim() || !state || !district) {
+      return res.status(400).json({ error: 'Missing required fields. All fields including Address are required.' });
     }
 
     // Check if user already registered
@@ -76,6 +76,34 @@ router.post('/register', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'National ID already registered' });
     }
 
+    // Check for duplicate phone number if provided
+    if (phoneNumber && phoneNumber.trim()) {
+      const duplicatePhone = await db.collection(collections.VOTER_REGISTRY)
+        .where('phoneNumber', '==', phoneNumber.trim())
+        .get();
+      
+      if (!duplicatePhone.empty) {
+        return res.status(400).json({ error: 'Phone number already registered' });
+      }
+    }
+
+    // Validate age (must be 18 or above)
+    const birthDate = new Date(dateOfBirth);
+    const today = new Date();
+    const age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    const dayDiff = today.getDate() - birthDate.getDate();
+    
+    // Calculate exact age considering month and day
+    let exactAge = age;
+    if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+      exactAge--;
+    }
+    
+    if (exactAge < 18) {
+      return res.status(400).json({ error: 'You must be at least 18 years old to register' });
+    }
+
     // Create voter record
     const voterData = {
       uid,
@@ -84,7 +112,7 @@ router.post('/register', verifyToken, async (req, res) => {
       lastName,
       dateOfBirth,
       nationalId,
-      address: address || '',
+      address: address.trim(),
       phoneNumber: phoneNumber || '',
       state: state.trim(),
       district: district.trim(),
@@ -200,12 +228,26 @@ router.put('/profile', verifyToken, async (req, res) => {
     
     const { address, phoneNumber, state, district, ward, constituency, lokSabhaConstituency } = req.body;
 
+    // Check for duplicate phone number if provided
+    if (phoneNumber && phoneNumber.trim()) {
+      const duplicatePhone = await db.collection(collections.VOTER_REGISTRY)
+        .where('phoneNumber', '==', phoneNumber.trim())
+        .get();
+      
+      // Check if the phone number belongs to another user (not the current user)
+      const phoneExists = !duplicatePhone.empty && duplicatePhone.docs.some(doc => doc.id !== uid);
+      
+      if (phoneExists) {
+        return res.status(400).json({ error: 'Phone number already registered' });
+      }
+    }
+
     const updateData = {
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     };
 
     if (address) updateData.address = address;
-    if (phoneNumber) updateData.phoneNumber = phoneNumber;
+    if (phoneNumber) updateData.phoneNumber = phoneNumber.trim();
     if (state) updateData.state = state.trim();
     if (district) updateData.district = district.trim();
     if (ward) updateData.ward = ward.trim();

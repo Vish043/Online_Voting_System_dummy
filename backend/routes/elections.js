@@ -44,6 +44,7 @@ function serializeElection(electionData) {
 }
 
 // Helper function to check if voter is eligible for an election
+// STRICT location matching: voters can only vote in elections for their registered location
 async function checkVoterEligibility(uid, election) {
   try {
     // Get voter data
@@ -60,38 +61,92 @@ async function checkVoterEligibility(uid, election) {
       return false;
     }
     
-    // Check eligibility based on election type
+    // Helper function for case-insensitive string comparison
+    const normalizeString = (str) => {
+      if (!str) return '';
+      return str.trim().toLowerCase();
+    };
+    
+    // Check eligibility based on election type - STRICT location matching
     const electionType = election.type || 'general';
     const allowedRegions = election.allowedRegions || [];
+    const regionHierarchy = election.regionHierarchy || {};
     
     if (electionType === 'national') {
-      // All verified voters are eligible for national elections
+      // For national elections (Lok Sabha), check if Lok Sabha constituency is specified
+      // If constituency is specified, only voters from that constituency can vote
+      if (election.constituency || regionHierarchy.lokSabhaConstituency) {
+        const electionLokSabha = election.constituency || regionHierarchy.lokSabhaConstituency;
+        if (!voter.lokSabhaConstituency) {
+          return false;
+        }
+        // Case-insensitive comparison for Lok Sabha constituency
+        return normalizeString(voter.lokSabhaConstituency) === normalizeString(electionLokSabha);
+      }
+      // If no specific constituency, all verified voters are eligible for national elections
       return true;
     } else if (electionType === 'state') {
-      // Voter must be in one of the allowed states
-      if (!voter.state || allowedRegions.length === 0) {
+      // For state elections, voter must match their registered location exactly
+      if (!voter.state) {
         return false;
       }
-      // Check if voter's state matches
-      if (!allowedRegions.includes(voter.state)) {
-        return false;
+      
+      // First check: Voter's state must be in allowed regions (case-insensitive)
+      if (allowedRegions.length > 0) {
+        const voterStateNormalized = normalizeString(voter.state);
+        const stateMatch = allowedRegions.some(region => normalizeString(region) === voterStateNormalized);
+        if (!stateMatch) {
+          return false;
+        }
       }
-      // If election has a constituency, check if voter's constituency matches
-      if (election.constituency && voter.constituency) {
-        return election.constituency === voter.constituency;
+      
+      // Second check: If election specifies a constituency (Vidhan Sabha), voter's constituency must match
+      if (election.constituency) {
+        // Election has a specific Vidhan Sabha constituency
+        if (!voter.constituency || normalizeString(election.constituency) !== normalizeString(voter.constituency)) {
+          return false;
+        }
+        // Also check Lok Sabha constituency if specified in regionHierarchy
+        if (regionHierarchy.lokSabhaConstituency && voter.lokSabhaConstituency) {
+          return normalizeString(regionHierarchy.lokSabhaConstituency) === normalizeString(voter.lokSabhaConstituency);
+        }
+        // If no Lok Sabha specified, constituency match is sufficient
+        return true;
+      } else if (regionHierarchy.lokSabhaConstituency) {
+        // Election specifies Lok Sabha constituency but no Vidhan Sabha
+        if (!voter.lokSabhaConstituency || normalizeString(regionHierarchy.lokSabhaConstituency) !== normalizeString(voter.lokSabhaConstituency)) {
+          return false;
+        }
+        return true;
+      } else {
+        // No specific constituency in election, all voters from the state are eligible
+        return true;
       }
-      // If no constituency specified in election, all voters from the state are eligible
-      return true;
     } else if (electionType === 'local') {
-      // Voter must match district or ward in allowed regions
-      if (!voter.district || !voter.ward || allowedRegions.length === 0) {
+      // For local elections, voter must match their registered district exactly
+      if (!voter.district || allowedRegions.length === 0) {
         return false;
       }
-      // Check if voter's district or ward is in allowed regions
-      // allowedRegions can contain district names or ward names
-      return allowedRegions.includes(voter.district) || 
-             allowedRegions.includes(voter.ward) ||
-             allowedRegions.includes(`${voter.district}-${voter.ward}`);
+      
+      // Check if voter's district is in allowed regions (case-insensitive)
+      const voterDistrictNormalized = normalizeString(voter.district);
+      const districtMatch = allowedRegions.some(region => normalizeString(region) === voterDistrictNormalized);
+      
+      // If regionHierarchy is specified, check for exact match
+      if (regionHierarchy.district) {
+        // Election specifies exact district
+        if (normalizeString(voter.district) !== normalizeString(regionHierarchy.district)) {
+          return false;
+        }
+        // District matches, check state as well if specified
+        if (regionHierarchy.state && voter.state) {
+          return normalizeString(regionHierarchy.state) === normalizeString(voter.state);
+        }
+        return true;
+      } else {
+        // No specific district hierarchy, check if district is in allowed regions
+        return districtMatch;
+      }
     }
     
     // Default: not eligible
@@ -179,14 +234,18 @@ router.get('/', verifyToken, async (req, res) => {
       }
       
       if (includeElection) {
-        // If admin, include all elections. Otherwise, check eligibility
+        // If admin, include all elections. Otherwise, check eligibility based on registered location
         if (isAdmin) {
           elections.push({ id: electionId, ...serializeElection(electionData) });
         } else {
+          // STRICT LOCATION FILTERING: Only show elections where voter's registered location matches
+          // This ensures voters can only see elections they are eligible to vote in
+          // Voters can only vote in elections for their registered state/district/constituency
           const eligible = await checkVoterEligibility(uid, { ...electionData, id: electionId });
           if (eligible) {
             elections.push({ id: electionId, ...serializeElection(electionData) });
           }
+          // Elections that don't match voter's registered location are filtered out
         }
       }
     }
@@ -378,6 +437,70 @@ router.get('/upcoming', verifyToken, async (req, res) => {
     
     // Return empty array instead of error to prevent UI breakage
     res.json({ elections: [] });
+  }
+});
+
+// Get All Elections (for "Other Elections" view - no eligibility filtering, just view-only)
+// This endpoint returns ALL elections regardless of voter location or eligibility
+// IMPORTANT: This route must be defined BEFORE /:electionId to avoid route matching conflicts
+router.get('/all', verifyToken, async (req, res) => {
+  try {
+    // Fetch ALL elections from database - NO filtering by eligibility or location
+    const electionsSnapshot = await db.collection(collections.ELECTIONS).get();
+    
+    const elections = [];
+    
+    electionsSnapshot.forEach(doc => {
+      const electionData = doc.data();
+      const electionId = doc.id;
+      
+      // Determine current status based on dates and status field
+      let currentStatus = electionData.status || 'scheduled';
+      const startDate = electionData.startDate?.toDate ? 
+        electionData.startDate.toDate() : 
+        (electionData.startDate?.seconds ? 
+          new Date(electionData.startDate.seconds * 1000) : 
+          null);
+      const endDate = electionData.endDate?.toDate ? 
+        electionData.endDate.toDate() : 
+        (electionData.endDate?.seconds ? 
+          new Date(electionData.endDate.seconds * 1000) : 
+          null);
+      const currentDate = new Date();
+      
+      // Override status based on current date if needed
+      if (startDate && endDate) {
+        if (currentDate < startDate) {
+          currentStatus = 'scheduled';
+        } else if (currentDate >= startDate && currentDate <= endDate) {
+          currentStatus = 'active';
+        } else if (currentDate > endDate) {
+          currentStatus = 'completed';
+        }
+      }
+      
+      // Include ALL elections - no filtering
+      elections.push({ 
+        id: electionId, 
+        ...serializeElection(electionData),
+        currentStatus: currentStatus // Add current status for display
+      });
+    });
+    
+    // Sort by startDate in descending order (most recent first)
+    if (elections.length > 0) {
+      elections.sort((a, b) => {
+        const dateA = a.startDate?.seconds ? new Date(a.startDate.seconds * 1000) : new Date(0);
+        const dateB = b.startDate?.seconds ? new Date(b.startDate.seconds * 1000) : new Date(0);
+        return dateB - dateA; // Descending order
+      });
+    }
+    
+    console.log(`[GET /elections/all] Returning ${elections.length} elections (no filtering applied)`);
+    res.json({ elections });
+  } catch (error) {
+    console.error('Fetch all elections error:', error);
+    res.status(500).json({ error: 'Failed to fetch elections' });
   }
 });
 

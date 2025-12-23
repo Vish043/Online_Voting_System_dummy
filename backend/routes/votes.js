@@ -83,43 +83,124 @@ router.post('/', verifyToken, verifyVoterEligibility, async (req, res) => {
 
     const electionType = electionData.type || 'general';
     const allowedRegions = electionData.allowedRegions || [];
+    const regionHierarchy = electionData.regionHierarchy || {};
 
-    // Check eligibility based on election type
+    // Helper function for case-insensitive string comparison
+    const normalizeString = (str) => {
+      if (!str) return '';
+      return str.trim().toLowerCase();
+    };
+
+    // Check eligibility based on election type - STRICT location matching
     let isEligible = false;
     if (electionType === 'national') {
-      // All verified voters are eligible for national elections
-      isEligible = true;
-    } else if (electionType === 'state') {
-      // Voter must be in one of the allowed states
-      if (!voter.state || allowedRegions.length === 0) {
-        isEligible = false;
-      } else {
-        // Check if voter's state matches
-        if (!allowedRegions.includes(voter.state)) {
+      // For national elections (Lok Sabha), check if Lok Sabha constituency is specified
+      // If constituency is specified, only voters from that constituency can vote
+      if (electionData.constituency || regionHierarchy.lokSabhaConstituency) {
+        const electionLokSabha = electionData.constituency || regionHierarchy.lokSabhaConstituency;
+        if (!voter.lokSabhaConstituency) {
           isEligible = false;
         } else {
-          // If election has a constituency, check if voter's constituency matches
-          if (electionData.constituency && voter.constituency) {
-            isEligible = electionData.constituency === voter.constituency;
+          // Case-insensitive comparison for Lok Sabha constituency
+          isEligible = normalizeString(voter.lokSabhaConstituency) === normalizeString(electionLokSabha);
+        }
+      } else {
+        // If no specific constituency, all verified voters are eligible for national elections
+        isEligible = true;
+      }
+    } else if (electionType === 'state') {
+      // For state elections, voter must match their registered location exactly
+      if (!voter.state) {
+        isEligible = false;
+      } else {
+        // First check: Voter's state must be in allowed regions (case-insensitive)
+        if (allowedRegions.length > 0) {
+          const voterStateNormalized = normalizeString(voter.state);
+          const stateMatch = allowedRegions.some(region => normalizeString(region) === voterStateNormalized);
+          if (!stateMatch) {
+            isEligible = false;
           } else {
-            // If no constituency specified in election, all voters from the state are eligible
+            // Second check: If election specifies a constituency (Vidhan Sabha), voter's constituency must match
+            if (electionData.constituency) {
+              // Election has a specific Vidhan Sabha constituency
+              if (!voter.constituency || normalizeString(electionData.constituency) !== normalizeString(voter.constituency)) {
+                isEligible = false;
+              } else {
+                // Also check Lok Sabha constituency if specified in regionHierarchy
+                if (regionHierarchy.lokSabhaConstituency && voter.lokSabhaConstituency) {
+                  isEligible = normalizeString(regionHierarchy.lokSabhaConstituency) === normalizeString(voter.lokSabhaConstituency);
+                } else {
+                  // If no Lok Sabha specified, constituency match is sufficient
+                  isEligible = true;
+                }
+              }
+            } else if (regionHierarchy.lokSabhaConstituency) {
+              // Election specifies Lok Sabha constituency but no Vidhan Sabha
+              if (!voter.lokSabhaConstituency || normalizeString(regionHierarchy.lokSabhaConstituency) !== normalizeString(voter.lokSabhaConstituency)) {
+                isEligible = false;
+              } else {
+                isEligible = true;
+              }
+            } else {
+              // No specific constituency in election, all voters from the state are eligible
+              isEligible = true;
+            }
+          }
+        } else {
+          // No allowed regions specified, check constituency matching
+          if (electionData.constituency) {
+            isEligible = voter.constituency && normalizeString(electionData.constituency) === normalizeString(voter.constituency);
+          } else {
             isEligible = true;
           }
         }
       }
     } else if (electionType === 'local') {
-      // Voter must match district or ward in allowed regions
-      if (voter.district && voter.ward && allowedRegions.length > 0) {
-        isEligible = allowedRegions.includes(voter.district) || 
-                     allowedRegions.includes(voter.ward) ||
-                     allowedRegions.includes(`${voter.district}-${voter.ward}`);
+      // For local elections, voter must match their registered district exactly
+      if (!voter.district || allowedRegions.length === 0) {
+        isEligible = false;
+      } else {
+        // Check if voter's district is in allowed regions (case-insensitive)
+        const voterDistrictNormalized = normalizeString(voter.district);
+        const districtMatch = allowedRegions.some(region => normalizeString(region) === voterDistrictNormalized);
+        
+        // If regionHierarchy is specified, check for exact match
+        if (regionHierarchy.district) {
+          // Election specifies exact district
+          if (normalizeString(voter.district) !== normalizeString(regionHierarchy.district)) {
+            isEligible = false;
+          } else {
+            // District matches, check state as well if specified
+            if (regionHierarchy.state && voter.state) {
+              isEligible = normalizeString(regionHierarchy.state) === normalizeString(voter.state);
+            } else {
+              isEligible = true;
+            }
+          }
+        } else {
+          // No specific district hierarchy, check if district is in allowed regions
+          isEligible = districtMatch;
+        }
       }
     }
 
     if (!isEligible) {
       return res.status(403).json({ 
-        error: 'You are not eligible to vote in this election based on your region',
-        details: `Election type: ${electionType}, Your region: ${voter.state || 'N/A'}/${voter.district || 'N/A'}/${voter.ward || 'N/A'}/${voter.constituency || 'N/A'}`
+        error: 'You are not eligible to vote in this election. You can only vote in elections for your registered location.',
+        details: {
+          electionType: electionType,
+          yourLocation: {
+            state: voter.state || 'Not registered',
+            district: voter.district || 'Not registered',
+            vidhanSabhaConstituency: voter.constituency || 'Not registered',
+            lokSabhaConstituency: voter.lokSabhaConstituency || 'Not registered'
+          },
+          electionLocation: {
+            allowedRegions: allowedRegions,
+            constituency: electionData.constituency || 'Not specified',
+            regionHierarchy: regionHierarchy
+          }
+        }
       });
     }
 
